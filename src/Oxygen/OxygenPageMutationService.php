@@ -49,7 +49,11 @@ final class OxygenPageMutationService
 
         $incomingTree = $this->treeFromOxygen($oxygen);
         if ($incomingTree === null) {
-            return new WP_Error('oxyai_invalid_oxygen_payload', __('No valid Oxygen element tree was provided.', 'oxyai-oxygen'), ['status' => 400]);
+            return new WP_Error(
+                'oxyai_invalid_oxygen_payload',
+                __('No valid Oxygen element tree was provided. Pass one of: {"documentTree":{"root":{...}}}, {"root":{...}}, {"element":{...}}, rawJson/json string, oxygen.element, or a bare node with data.type plus id and/or children.', 'oxyai-oxygen'),
+                ['status' => 400, 'expectedKeys' => ['documentTree', 'root', 'element', 'rawJson', 'json', 'oxygen', 'data', 'id', 'children']]
+            );
         }
 
         $operation = $this->normalizeOperation((string) ($options['operation'] ?? $options['mode'] ?? 'append'));
@@ -358,7 +362,27 @@ final class OxygenPageMutationService
             return $this->normalizeDocumentTree($oxygen);
         }
 
+        if ($this->looksLikeElementNode($oxygen)) {
+            return $this->normalizeDocumentTree($oxygen);
+        }
+
         return null;
+    }
+
+    /**
+     * @param array<string, mixed> $candidate
+     */
+    private function looksLikeElementNode(array $candidate): bool
+    {
+        if (!isset($candidate['data']) || !is_array($candidate['data'])) {
+            return false;
+        }
+
+        $hasId = isset($candidate['id']) && is_numeric($candidate['id']);
+        $hasChildren = isset($candidate['children']) && is_array($candidate['children']);
+        $hasType = isset($candidate['data']['type']) && is_string($candidate['data']['type']);
+
+        return $hasType && ($hasId || $hasChildren);
     }
 
     private function normalizeOperation(string $operation): string
