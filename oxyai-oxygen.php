@@ -17,12 +17,12 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('OXYAI_OXYGEN_VERSION', '0.2.0');
-define('OXYAI_OXYGEN_PATH', plugin_dir_path(__FILE__));
-define('OXYAI_OXYGEN_URL', plugin_dir_url(__FILE__));
-define('OXYAI_OXYGEN_OPTION', 'oxyai_oxygen_settings');
-define('OXYAI_OXYGEN_HISTORY_OPTION', 'oxyai_oxygen_history');
-define('OXYAI_OXYGEN_PRESETS_OPTION', 'oxyai_oxygen_presets');
+defined('OXYAI_OXYGEN_VERSION') || define('OXYAI_OXYGEN_VERSION', '0.2.0');
+defined('OXYAI_OXYGEN_PATH') || define('OXYAI_OXYGEN_PATH', plugin_dir_path(__FILE__));
+defined('OXYAI_OXYGEN_URL') || define('OXYAI_OXYGEN_URL', plugin_dir_url(__FILE__));
+defined('OXYAI_OXYGEN_OPTION') || define('OXYAI_OXYGEN_OPTION', 'oxyai_oxygen_settings');
+defined('OXYAI_OXYGEN_HISTORY_OPTION') || define('OXYAI_OXYGEN_HISTORY_OPTION', 'oxyai_oxygen_history');
+defined('OXYAI_OXYGEN_PRESETS_OPTION') || define('OXYAI_OXYGEN_PRESETS_OPTION', 'oxyai_oxygen_presets');
 
 require_once OXYAI_OXYGEN_PATH . 'vendor/oxygen-html-converter/src/polyfills.php';
 

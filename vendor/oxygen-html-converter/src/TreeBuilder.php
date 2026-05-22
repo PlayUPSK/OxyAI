@@ -523,7 +523,7 @@ class TreeBuilder
 
         // Extract and convert inline style attributes only when inline style mode is enabled.
         $styleProperties = $this->inlineStyles
-            ? $this->styleExtractor->extractAndConvert($node)
+            ? $this->styleExtractor->extractAndConvert($node, $elementType)
             : [];
 
         // Merge properties
@@ -643,7 +643,9 @@ class TreeBuilder
             if ($textChild !== null) {
                 // Ensure text inside button is centered in Oxygen
                 $textChild['data']['properties']['design']['typography'] = $textChild['data']['properties']['design']['typography'] ?? [];
-                $textChild['data']['properties']['design']['typography']['text-align'] = 'center';
+                $textChild['data']['properties']['design']['typography']['text_align'] = [
+                    'breakpoint_base' => 'center',
+                ];
                 $element['children'][] = $textChild;
             }
 
@@ -780,7 +782,7 @@ class TreeBuilder
 
             $expandedDeclarations = $this->expandShorthandProperties($rule['declarations']);
             $materializedDeclarations = $this->filterNeutralFallbackDeclarations($expandedDeclarations);
-            $convertedStyles = $this->styleExtractor->toOxygenProperties($materializedDeclarations);
+            $convertedStyles = $this->styleExtractor->toOxygenProperties($materializedDeclarations, $elementType);
 
             if ($convertedStyles === []) {
                 continue;
@@ -825,7 +827,7 @@ class TreeBuilder
                 ['design' => $rule['convertedStyles']]
             );
 
-            if ($this->styleExtractor->supportsDeclarationsFully($rule['declarations'])) {
+            if ($this->styleExtractor->supportsDeclarationsFully($rule['declarations'], $elementType)) {
                 $this->consumedCssSelectors[$rule['selector']] = true;
             }
 
