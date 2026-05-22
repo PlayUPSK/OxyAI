@@ -478,69 +478,85 @@ final class OxygenPageMutationService
      * of the page.
      *
      * @param array<string, mixed> $tree
-     * @return array<int, string>
+     * @return array<string, string>
      */
     private function fingerprintNonTargetNodes(array $tree, int $targetNodeId): array
     {
         $fingerprints = [];
-        $this->collectNodeFingerprints($tree['root'] ?? [], $targetNodeId, $fingerprints);
+        $this->collectNodeFingerprints($tree['root'] ?? [], $targetNodeId, $fingerprints, 'root');
         return $fingerprints;
     }
 
     /**
      * @param mixed $node
-     * @param array<int, string> $fingerprints
+     * @param array<string, string> $fingerprints
      */
-    private function collectNodeFingerprints($node, int $skipSubtreeId, array &$fingerprints): void
+    private function collectNodeFingerprints($node, int $skipSubtreeId, array &$fingerprints, string $path): void
     {
         if (!is_array($node)) {
             return;
         }
 
         $nodeId = isset($node['id']) && is_numeric($node['id']) ? (int) $node['id'] : 0;
+        $nodeKey = $path . '#id=' . ($nodeId > 0 ? (string) $nodeId : 'missing');
 
         if ($nodeId === $skipSubtreeId) {
             return;
         }
 
-        if ($nodeId > 0) {
-            $shallow = $node;
-            unset($shallow['children']);
-            $fingerprints[$nodeId] = md5(serialize($shallow));
+        $children = $node['children'] ?? [];
+        $childLinks = [];
+        if (is_array($children)) {
+            foreach ($children as $index => $child) {
+                if (!is_array($child)) {
+                    $childLinks[] = $index . ':non-node';
+                    continue;
+                }
+
+                $childId = isset($child['id']) && is_numeric($child['id']) ? (int) $child['id'] : 0;
+                $childLinks[] = $index . ':' . ($childId > 0 ? (string) $childId : 'missing');
+            }
         }
 
-        $children = $node['children'] ?? [];
+        $shallow = $node;
+        unset($shallow['children']);
+        $shallow['_oxyai_child_links'] = $childLinks;
+        $fingerprints[$nodeKey] = md5(serialize($shallow));
+
         if (!is_array($children)) {
             return;
         }
 
-        foreach ($children as $child) {
-            $this->collectNodeFingerprints($child, $skipSubtreeId, $fingerprints);
+        foreach ($children as $index => $child) {
+            $this->collectNodeFingerprints($child, $skipSubtreeId, $fingerprints, $path . '.children[' . $index . ']');
         }
     }
 
     /**
-     * @param array<int, string> $before
-     * @param array<int, string> $after
+     * @param array<string, string> $before
+     * @param array<string, string> $after
      * @return array<int, array<string, mixed>>
      */
     private function diffNodeFingerprints(array $before, array $after): array
     {
         $changes = [];
-        foreach ($before as $id => $hash) {
-            if (!array_key_exists($id, $after)) {
-                $changes[] = ['nodeId' => $id, 'change' => 'removed'];
+        foreach ($before as $nodeKey => $hash) {
+            if (!array_key_exists($nodeKey, $after)) {
+                $changes[] = ['nodeKey' => $nodeKey, 'change' => 'removed'];
                 continue;
             }
-            if ($after[$id] !== $hash) {
-                $changes[] = ['nodeId' => $id, 'change' => 'modified'];
+            if ($after[$nodeKey] !== $hash) {
+                $changes[] = ['nodeKey' => $nodeKey, 'change' => 'modified'];
             }
         }
-        foreach ($after as $id => $hash) {
-            if (!array_key_exists($id, $before)) {
-                $changes[] = ['nodeId' => $id, 'change' => 'added_outside_target'];
+        foreach ($after as $nodeKey => $hash) {
+            if (!array_key_exists($nodeKey, $before)) {
+                $changes[] = ['nodeKey' => $nodeKey, 'change' => 'added_outside_target'];
             }
         }
+
+        usort($changes, static fn (array $a, array $b): int => [$a['nodeKey'] ?? '', $a['change'] ?? ''] <=> [$b['nodeKey'] ?? '', $b['change'] ?? '']);
+
         return $changes;
     }
 
