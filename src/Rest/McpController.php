@@ -244,6 +244,9 @@ final class McpController
                 (int) ($input['postId'] ?? $input['id'] ?? 0),
                 (string) ($input['backupId'] ?? '')
             ),
+            'recompile_oxygen_css' => $this->pageMutations->recompileCss(
+                (int) ($input['postId'] ?? $input['id'] ?? 0)
+            ),
             'list_design_presets' => ['success' => true, 'presets' => $this->presets->all()],
             'generate_html_css_js' => $this->aiGateway->generate($input),
             'preview_conversion' => $this->converter->preview(SourceBundle::fromArray($input), is_array($input['options'] ?? null) ? $input['options'] : []),
@@ -312,6 +315,9 @@ final class McpController
                 'postId' => ['type' => 'integer'],
                 'backupId' => ['type' => 'string'],
             ], ['postId', 'backupId']),
+            $this->tool('recompile_oxygen_css', 'Force Oxygen to regenerate the compiled stylesheet for a page. Removes the on-disk post-{id}.css file, busts every known cache meta, and invokes available Breakdance rebuild functions. Call after apply_* operations when the page renders unstyled despite a successful write.', [
+                'postId' => ['type' => 'integer'],
+            ], ['postId']),
             $this->tool('convert_html_to_oxygen', 'Convert HTML/CSS/JS into builder-safe Oxygen payload JSON.', [
                 'html' => ['type' => 'string'],
                 'css' => ['type' => 'string'],
