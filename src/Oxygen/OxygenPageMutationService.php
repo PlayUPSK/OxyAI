@@ -573,7 +573,7 @@ final class OxygenPageMutationService
             return false;
         }
 
-        return (bool) preg_match('/[A-Z][a-z]+Elements[A-Z]/', $type);
+        return (bool) preg_match('/^[A-Z][A-Za-z0-9_]*Elements[A-Z][A-Za-z0-9_]*$/', $type);
     }
 
     /**
