@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace OxyAI\Oxygen\Rest;
 
 use OxyAI\Oxygen\Ai\AiGateway;
+use OxyAI\Oxygen\Ai\PlanModeService;
+use OxyAI\Oxygen\Ai\TripleShotService;
 use OxyAI\Oxygen\Conversion\ConverterKernelAdapter;
 use OxyAI\Oxygen\History\HistoryStore;
+use OxyAI\Oxygen\Inspirations\SiteInspirationStore;
 use OxyAI\Oxygen\Security\CapabilityService;
 use WP_Error;
 use WP_REST_Request;
@@ -19,7 +22,10 @@ final class AiController
         private readonly CapabilityService $capabilities,
         private readonly AiGateway $aiGateway,
         private readonly ConverterKernelAdapter $converter,
-        private readonly HistoryStore $history
+        private readonly HistoryStore $history,
+        private readonly PlanModeService $planMode,
+        private readonly TripleShotService $tripleShot,
+        private readonly SiteInspirationStore $inspirations
     ) {
     }
 
@@ -36,6 +42,24 @@ final class AiController
                 'methods' => 'POST',
                 'permission_callback' => fn (): bool => $this->capabilities->canUseRest(),
                 'callback' => fn (WP_REST_Request $request) => $this->generateAndConvert($request),
+            ]);
+
+            register_rest_route('oxyai/v1', '/plan', [
+                'methods' => 'POST',
+                'permission_callback' => fn (): bool => $this->capabilities->canUseRest(),
+                'callback' => fn (WP_REST_Request $request) => $this->plan($request),
+            ]);
+
+            register_rest_route('oxyai/v1', '/triple-shot', [
+                'methods' => 'POST',
+                'permission_callback' => fn (): bool => $this->capabilities->canUseRest(),
+                'callback' => fn (WP_REST_Request $request) => $this->tripleShot($request),
+            ]);
+
+            register_rest_route('oxyai/v1', '/site-inspirations', [
+                'methods' => 'GET',
+                'permission_callback' => fn (): bool => $this->capabilities->canUseRest(),
+                'callback' => fn () => $this->ok(['success' => true, 'siteInspirations' => $this->inspirations->all()]),
             ]);
         });
     }
@@ -94,6 +118,28 @@ final class AiController
         return $this->ok($converted);
     }
 
+    public function plan(WP_REST_Request $request)
+    {
+        $result = $this->planMode->plan($this->input($request));
+        return is_wp_error($result) ? $this->error($result) : $this->ok($result);
+    }
+
+    public function tripleShot(WP_REST_Request $request)
+    {
+        $result = $this->tripleShot->generate($this->input($request));
+        if (!is_wp_error($result)) {
+            $this->history->add([
+                'type' => 'triple-shot',
+                'prompt' => (string) ($request->get_param('prompt') ?? ''),
+                'provider' => (string) ($request->get_param('provider') ?? ''),
+                'preset' => (string) ($request->get_param('preset') ?? ''),
+                'source' => $result,
+            ]);
+        }
+
+        return is_wp_error($result) ? $this->error($result) : $this->ok($result);
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -103,6 +149,7 @@ final class AiController
             'prompt' => $request->get_param('prompt'),
             'provider' => $request->get_param('provider'),
             'preset' => $request->get_param('preset'),
+            'siteInspiration' => $request->get_param('siteInspiration'),
             'context' => $request->get_param('context'),
         ];
     }

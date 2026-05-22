@@ -58,6 +58,24 @@
             <button type="button" data-oxyai-builder-mode="chat">Chat</button>
           </div>
           <p class="oxyai-builder-help" data-oxyai-help>Paste source code, generate with AI, or chat against the selected Oxygen element. Results stay editable after conversion.</p>
+          <div class="oxyai-builder-direction">
+            <label>Site inspiration
+              <select data-oxyai-site-inspiration>
+                <option value="">No inspiration</option>
+                <option value="editorial-luxury">Editorial Luxury</option>
+                <option value="technical-saas">Technical SaaS</option>
+                <option value="warm-marketplace">Warm Marketplace</option>
+                <option value="bold-launch">Bold Launch</option>
+                <option value="minimal-product">Minimal Product</option>
+              </select>
+            </label>
+            <div>
+              <button type="button" data-oxyai-plan>Plan first</button>
+              <button type="button" data-oxyai-triple-shot>Triple Shot</button>
+            </div>
+          </div>
+          <div class="oxyai-builder-plan" data-oxyai-plan-result hidden></div>
+          <div class="oxyai-builder-variants" data-oxyai-variants hidden></div>
           <section class="oxyai-builder-chat" data-oxyai-chat hidden>
             <div class="oxyai-builder-target">
               <div>
@@ -140,6 +158,8 @@
       if (event.target === event.currentTarget) close();
     });
     modal.querySelector("[data-oxyai-generate]").addEventListener("click", runGenerate);
+    modal.querySelector("[data-oxyai-plan]").addEventListener("click", runPlan);
+    modal.querySelector("[data-oxyai-triple-shot]").addEventListener("click", runTripleShot);
     modal.querySelector("[data-oxyai-edit]").addEventListener("click", runEditSelected);
     modal.querySelector("[data-oxyai-convert]").addEventListener("click", runConvert);
     modal.querySelector("[data-oxyai-copy]").addEventListener("click", copyJson);
@@ -178,6 +198,13 @@
       includeCssElement: field("[data-oxyai-css-code]").checked,
       useSelectors: field("[data-oxyai-selectors]").checked,
       wrapInContainer: true,
+    };
+  }
+
+  function aiInput(prompt) {
+    return {
+      prompt: prompt || field("[data-oxyai-prompt]").value.trim(),
+      siteInspiration: field("[data-oxyai-site-inspiration]")?.value || "",
     };
   }
 
@@ -266,7 +293,7 @@
     try {
       status(strings.working || "Working...");
       const prompt = field("[data-oxyai-prompt]").value.trim();
-      const data = await request("/generate", { prompt, context: getSelectedContext() });
+      const data = await request("/generate", { ...aiInput(prompt), context: getSelectedContext() });
       const generated = data.source || {};
       field("[data-oxyai-html]").value = generated.html || "";
       field("[data-oxyai-css]").value = generated.css || "";
@@ -276,6 +303,120 @@
     } catch (error) {
       status(error?.message || strings.failed || "Request failed.", true);
     }
+  }
+
+  async function runPlan() {
+    try {
+      const input = aiInput();
+      if (!input.prompt) {
+        status("Write a prompt before using Plan Mode.", true);
+        return;
+      }
+
+      status("Planning generation...");
+      const data = await request("/plan", { ...input, context: getSelectedContext() });
+      renderPlan(data.plan || {});
+      status(data.plan?.status === "ready" ? "Plan is ready." : "Plan questions ready.");
+    } catch (error) {
+      status(error?.message || strings.failed || "Request failed.", true);
+    }
+  }
+
+  function renderPlan(plan) {
+    const target = field("[data-oxyai-plan-result]");
+    if (!target) return;
+    const questions = Array.isArray(plan?.questions) ? plan.questions : [];
+    target.hidden = false;
+    target.innerHTML = `
+      <strong>${escapeHtml(plan?.status === "ready" ? "Ready to generate" : "Answer before generating")}</strong>
+      <p>${escapeHtml(plan?.summary || "Review the plan before generating.")}</p>
+      ${questions.map(renderPlanQuestion).join("")}
+      <button type="button" data-oxyai-use-plan>Use planned prompt</button>
+    `;
+    target.querySelector("[data-oxyai-use-plan]")?.addEventListener("click", function () {
+      const additions = collectPlanAnswers(target, questions);
+      const readyPrompt = (plan?.readyPrompt || aiInput().prompt || "").trim();
+      field("[data-oxyai-prompt]").value = [readyPrompt, additions ? "User choices:\n" + additions : ""].filter(Boolean).join("\n\n");
+      status("Plan applied to the prompt.");
+    });
+  }
+
+  async function runTripleShot() {
+    try {
+      const input = aiInput();
+      if (!input.prompt) {
+        status("Write a prompt before using Triple Shot.", true);
+        return;
+      }
+
+      status("Generating three variants...");
+      const data = await request("/triple-shot", { ...input, context: getSelectedContext() });
+      renderVariants(data.variants || []);
+      status("Triple Shot variants ready.");
+    } catch (error) {
+      status(error?.message || strings.failed || "Request failed.", true);
+    }
+  }
+
+  function renderVariants(variants) {
+    const target = field("[data-oxyai-variants]");
+    if (!target) return;
+    const normalized = Array.isArray(variants) ? variants : [];
+    target.hidden = false;
+    target.innerHTML = normalized.length
+      ? normalized.map((variant, index) => `
+          <section>
+            <div>
+              <strong>${escapeHtml(variant.name || "Variant " + (index + 1))}</strong>
+              <span>${escapeHtml(variant.slug || "")}</span>
+            </div>
+            <button type="button" data-oxyai-use-variant="${index}">Use</button>
+          </section>
+        `).join("")
+      : "<p>No variants returned.</p>";
+    target.querySelectorAll("[data-oxyai-use-variant]").forEach((button) => {
+      button.addEventListener("click", function () {
+        const variant = normalized[parseInt(button.getAttribute("data-oxyai-use-variant") || "0", 10)] || {};
+        const generated = variant.source || {};
+        field("[data-oxyai-html]").value = generated.html || "";
+        field("[data-oxyai-css]").value = generated.css || "";
+        field("[data-oxyai-js]").value = generated.js || "";
+        setMode("paste");
+        status("Variant loaded into source fields.");
+      });
+    });
+  }
+
+  function renderPlanQuestion(question) {
+    const id = escapeAttr(question.id || question.label || "question");
+    const type = question.type === "multi_choice" ? "checkbox" : "radio";
+    const options = Array.isArray(question.options) ? question.options : [];
+    const controls = options.length
+      ? options.map((option, index) => `<label><input type="${type}" name="oxyai-builder-plan-${id}" value="${escapeHtml(option)}"${index === 0 && type === "radio" ? " checked" : ""}> ${escapeHtml(option)}</label>`).join("")
+      : `<input type="text" data-oxyai-plan-text="${id}" placeholder="Type an answer...">`;
+    return `
+      <section data-oxyai-question="${id}">
+        <span>${escapeHtml(question.label || "Question")}</span>
+        ${question.why ? `<p>${escapeHtml(question.why)}</p>` : ""}
+        <div>${controls}</div>
+        ${question.allowCustom && options.length ? `<input type="text" data-oxyai-plan-custom="${id}" placeholder="Optional custom answer...">` : ""}
+      </section>
+    `;
+  }
+
+  function collectPlanAnswers(container, questions) {
+    return questions.map((question) => {
+      const id = escapeAttr(question.id || question.label || "question");
+      const section = container.querySelector(`[data-oxyai-question="${id}"]`);
+      if (!section) return "";
+      const checked = Array.from(section.querySelectorAll("input[type='radio']:checked, input[type='checkbox']:checked"))
+        .map((input) => input.value)
+        .filter(Boolean);
+      const text = section.querySelector(`[data-oxyai-plan-text="${id}"]`)?.value || "";
+      const custom = section.querySelector(`[data-oxyai-plan-custom="${id}"]`)?.value || "";
+      const answer = checked.concat([text, custom]).map((value) => value.trim()).filter(Boolean).join(", ");
+      return answer ? `${question.label}: ${answer}` : "";
+    }).filter(Boolean).join("\n");
   }
 
   async function runConvert() {
@@ -328,7 +469,7 @@
       status(strings.working || "Working...");
       const prompt = field("[data-oxyai-prompt]").value.trim();
       const data = await request("/generate-and-convert", {
-        prompt,
+        ...aiInput(prompt),
         context: getSelectedContext(),
         options: options(),
       });
@@ -368,7 +509,7 @@
 
     try {
       const data = await request("/generate", {
-        prompt: buildChatPrompt(message, false),
+        ...aiInput(buildChatPrompt(message, false)),
         context: buildChatContext(),
       });
       const generated = data.source || {};
@@ -394,7 +535,7 @@
     status(strings.working || "Working...");
     try {
       const data = await request("/generate-and-convert", {
-        prompt: buildChatPrompt(message, true),
+        ...aiInput(buildChatPrompt(message, true)),
         context: buildChatContext(),
         options: options(),
       });

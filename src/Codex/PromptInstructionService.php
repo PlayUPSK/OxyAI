@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace OxyAI\Oxygen\Codex;
 
+use OxyAI\Oxygen\Inspirations\SiteInspirationStore;
 use OxyAI\Oxygen\Presets\PresetStore;
 
 final class PromptInstructionService
 {
-    public function __construct(private readonly PresetStore $presets)
-    {
+    public function __construct(
+        private readonly PresetStore $presets,
+        private readonly SiteInspirationStore $inspirations = new SiteInspirationStore()
+    ) {
     }
 
     /**
@@ -29,6 +32,8 @@ final class PromptInstructionService
                 'Do not include PHP, WordPress loops, shortcodes, dynamic bindings, forms, or server-side code unless explicitly supported by the target context.',
                 'Preserve stable classes, links, content, and image intent when editing an existing target.',
                 'If styles use media queries, pseudo selectors, keyframes, or complex selectors, keep them in CSS so the converter can preserve them in CSS Code.',
+                'Use plan_generation when the prompt is short, ambiguous, or when the user asks for a planning/clarification step.',
+                'Use triple_shot_generation when the user wants options, variants, or help choosing a creative direction.',
                 'Use dryRun=true before direct page writes when the user has not explicitly approved applying content.',
                 'Prefer append for new sections, replace_node for selected static elements, and replace only when the user explicitly wants to overwrite the page tree.',
                 'Always send non-ASCII characters as JSON unicode escapes (for example, \\u00E4; use surrogate pairs for non-BMP characters). Do not send raw UTF-8 bytes in html, css, js, or oxygen fields - downstream storage can double-encode them and corrupt diacritics.',
@@ -37,6 +42,7 @@ final class PromptInstructionService
             ],
             'mcpWorkflow' => [
                 'Inspect pages with list_oxygen_pages and get_page_context.',
+                'Optionally call list_site_inspirations, plan_generation, or triple_shot_generation before generating.',
                 'Generate HTML/CSS/JS, then call preview_conversion or convert_html_to_oxygen.',
                 'For user-reviewed insertion, call convert_and_stage_page so the Oxygen sidebar can apply the handoff.',
                 'For direct insertion, call apply_html_to_oxygen_page with operation append, replace_node, or replace. OxyAI creates a restore backup automatically.',
@@ -53,6 +59,7 @@ final class PromptInstructionService
                 ],
             ],
             'presets' => $this->presets->all(),
+            'siteInspirations' => $this->inspirations->all(),
         ];
     }
 }

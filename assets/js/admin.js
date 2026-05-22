@@ -37,6 +37,14 @@
     };
   }
 
+  function aiInput() {
+    return {
+      prompt: ($("oxyai-prompt")?.value || "").trim(),
+      preset: $("oxyai-preset")?.value || "",
+      siteInspiration: $("oxyai-site-inspiration")?.value || "",
+    };
+  }
+
   async function request(path, payload, method) {
     const response = await fetch(config.restUrl + path, {
       method: method || "POST",
@@ -77,6 +85,104 @@
     state.lastJson = json;
     if (output) output.value = json;
     renderAudit(oxygen?.audit || {});
+  }
+
+  function renderPlan(plan) {
+    const target = $("oxyai-plan");
+    if (!target) return;
+
+    const questions = Array.isArray(plan?.questions) ? plan.questions : [];
+    target.hidden = false;
+    target.innerHTML = `
+      <div class="oxyai-plan-head">
+        <strong>${escapeHtml(plan?.status === "ready" ? "Ready to generate" : "Plan Mode questions")}</strong>
+        <span>${escapeHtml(plan?.summary || "Review the plan before generating.")}</span>
+      </div>
+      ${
+        questions.length
+          ? `<div class="oxyai-plan-questions">${questions.map(renderPlanQuestion).join("")}</div>`
+          : ""
+      }
+      <div class="oxyai-plan-actions">
+        <button type="button" class="button button-primary" data-oxyai-use-plan>Use planned prompt</button>
+      </div>
+    `;
+
+    target.querySelector("[data-oxyai-use-plan]")?.addEventListener("click", function () {
+      const additions = collectPlanAnswers(target, questions);
+      const readyPrompt = (plan?.readyPrompt || aiInput().prompt || "").trim();
+      const nextPrompt = [readyPrompt, additions ? "User choices:\n" + additions : ""].filter(Boolean).join("\n\n");
+      if ($("oxyai-prompt")) $("oxyai-prompt").value = nextPrompt;
+      setStatus("Plan applied to the prompt. Generate source when ready.");
+    });
+  }
+
+  function renderVariants(variants) {
+    const target = $("oxyai-variants");
+    if (!target) return;
+
+    const normalized = Array.isArray(variants) ? variants : [];
+    target.hidden = false;
+    target.innerHTML = normalized.length
+      ? normalized.map((variant, index) => `
+          <section>
+            <div>
+              <strong>${escapeHtml(variant.name || "Variant " + (index + 1))}</strong>
+              <span>${escapeHtml(variant.slug || "")}</span>
+            </div>
+            <button type="button" class="button" data-oxyai-use-variant="${index}">Use this source</button>
+          </section>
+        `).join("")
+      : "<p>No variants returned.</p>";
+
+    target.querySelectorAll("[data-oxyai-use-variant]").forEach((button) => {
+      button.addEventListener("click", function () {
+        const variant = normalized[parseInt(button.getAttribute("data-oxyai-use-variant") || "0", 10)] || {};
+        const generated = variant.source || {};
+        if ($("oxyai-html")) $("oxyai-html").value = generated.html || "";
+        if ($("oxyai-css")) $("oxyai-css").value = generated.css || "";
+        if ($("oxyai-js")) $("oxyai-js").value = generated.js || "";
+        setStatus("Variant loaded into source fields. Preview or convert when ready.");
+      });
+    });
+  }
+
+  function renderPlanQuestion(question) {
+    const id = escapeAttr(question.id || question.label || "question");
+    const type = question.type || "single_choice";
+    const options = Array.isArray(question.options) ? question.options : [];
+    const inputs = options.length
+      ? options.map((option, index) => {
+          const inputType = type === "multi_choice" ? "checkbox" : "radio";
+          return `<label><input type="${inputType}" name="oxyai-plan-${id}" value="${escapeAttribute(option)}"${
+            index === 0 && inputType === "radio" ? " checked" : ""
+          }> ${escapeHtml(option)}</label>`;
+        }).join("")
+      : `<input type="${type === "color" ? "text" : "text"}" data-oxyai-plan-text="${id}" placeholder="Type an answer...">`;
+
+    return `
+      <section data-oxyai-question="${id}" data-oxyai-question-label="${escapeAttr(question.label || "")}">
+        <strong>${escapeHtml(question.label || "Question")}</strong>
+        ${question.why ? `<p>${escapeHtml(question.why)}</p>` : ""}
+        <div>${inputs}</div>
+        ${question.allowCustom && options.length ? `<input type="text" data-oxyai-plan-custom="${id}" placeholder="Optional custom answer...">` : ""}
+      </section>
+    `;
+  }
+
+  function collectPlanAnswers(container, questions) {
+    return questions.map((question) => {
+      const id = escapeAttr(question.id || question.label || "question");
+      const section = container.querySelector(`[data-oxyai-question="${id}"]`);
+      if (!section) return "";
+      const checked = Array.from(section.querySelectorAll("input[type='radio']:checked, input[type='checkbox']:checked"))
+        .map((input) => input.value)
+        .filter(Boolean);
+      const text = section.querySelector(`[data-oxyai-plan-text="${id}"]`)?.value || "";
+      const custom = section.querySelector(`[data-oxyai-plan-custom="${id}"]`)?.value || "";
+      const answer = checked.concat([text, custom]).map((value) => value.trim()).filter(Boolean).join(", ");
+      return answer ? `${question.label}: ${answer}` : "";
+    }).filter(Boolean).join("\n");
   }
 
   function activateMode(mode) {
@@ -177,7 +283,8 @@
   }
 
   async function generate() {
-    const prompt = ($("oxyai-prompt")?.value || "").trim();
+    const input = aiInput();
+    const prompt = input.prompt;
     if (!prompt) {
       setStatus("Prompt is required for AI generation.", true);
       return;
@@ -185,14 +292,39 @@
 
     setStatus(strings.working || "Working...");
     const data = await request("/generate", {
-      prompt,
-      preset: $("oxyai-preset")?.value || "",
+      ...input,
     });
     const generated = data.source || {};
     if ($("oxyai-html")) $("oxyai-html").value = generated.html || "";
     if ($("oxyai-css")) $("oxyai-css").value = generated.css || "";
     if ($("oxyai-js")) $("oxyai-js").value = generated.js || "";
     setStatus(strings.generated || "AI source generated.");
+  }
+
+  async function plan() {
+    const input = aiInput();
+    if (!input.prompt) {
+      setStatus("Prompt is required for Plan Mode.", true);
+      return;
+    }
+
+    setStatus("Planning generation...");
+    const data = await request("/plan", input);
+    renderPlan(data.plan || {});
+    setStatus(data.plan?.status === "ready" ? "Plan is ready. Use the planned prompt or generate now." : "Plan questions ready.");
+  }
+
+  async function tripleShot() {
+    const input = aiInput();
+    if (!input.prompt) {
+      setStatus("Prompt is required for Triple Shot.", true);
+      return;
+    }
+
+    setStatus("Generating three variants...");
+    const data = await request("/triple-shot", input);
+    renderVariants(data.variants || []);
+    setStatus("Triple Shot variants ready. Choose one to load into the source fields.");
   }
 
   async function copyOutput() {
@@ -254,6 +386,14 @@
       .replace(/"/g, "&quot;");
   }
 
+  function escapeAttribute(value) {
+    return escapeHtml(value).replace(/'/g, "&#039;");
+  }
+
+  function escapeAttr(value) {
+    return String(value).replace(/[^a-z0-9_-]/gi, "");
+  }
+
   function bind(id, handler) {
     const el = $(id);
     if (!el) return;
@@ -270,6 +410,8 @@
     bind("oxyai-run-preview", preview);
     bind("oxyai-run-convert", convert);
     bind("oxyai-run-generate", generate);
+    bind("oxyai-run-plan", plan);
+    bind("oxyai-run-triple-shot", tripleShot);
     bind("oxyai-copy-output", copyOutput);
     bind("oxyai-load-pages", loadPages);
     bind("oxyai-apply-page", function () { return applyToPage(false); });

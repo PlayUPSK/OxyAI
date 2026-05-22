@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OxyAI\Oxygen\Admin;
 
+use OxyAI\Oxygen\Inspirations\SiteInspirationStore;
 use OxyAI\Oxygen\Presets\PresetStore;
 use OxyAI\Oxygen\Security\CapabilityService;
 use OxyAI\Oxygen\Settings\SettingsRepository;
@@ -13,6 +14,7 @@ final class AdminPage
     public function __construct(
         private readonly SettingsRepository $settings,
         private readonly PresetStore $presets,
+        private readonly SiteInspirationStore $inspirations,
         private readonly CapabilityService $capabilities
     ) {
     }
@@ -40,6 +42,7 @@ final class AdminPage
         $settings = $this->settings->all();
         $settings['mcp_token'] = $this->settings->ensureMcpToken();
         $presets = $this->presets->all();
+        $inspirations = $this->inspirations->all();
         $mcpUrl = rest_url('oxyai/v1/mcp');
         $codexUrl = add_query_arg('oxyai_token', (string) $settings['mcp_token'], $mcpUrl);
         ?>
@@ -83,6 +86,8 @@ final class AdminPage
                                 <h2><?php echo esc_html__('Composer', 'oxyai-oxygen'); ?></h2>
                             </div>
                             <div class="oxyai-actions">
+                                <button type="button" class="button" id="oxyai-run-plan"><?php echo esc_html__('Plan first', 'oxyai-oxygen'); ?></button>
+                                <button type="button" class="button" id="oxyai-run-triple-shot"><?php echo esc_html__('Triple Shot', 'oxyai-oxygen'); ?></button>
                                 <button type="button" class="button" id="oxyai-run-generate"><?php echo esc_html__('Generate source', 'oxyai-oxygen'); ?></button>
                                 <button type="button" class="button" id="oxyai-run-preview"><?php echo esc_html__('Preview', 'oxyai-oxygen'); ?></button>
                                 <button type="button" class="button button-primary" id="oxyai-run-convert"><?php echo esc_html__('Convert', 'oxyai-oxygen'); ?></button>
@@ -101,8 +106,19 @@ final class AdminPage
                             <?php endforeach; ?>
                         </select>
 
+                        <label for="oxyai-site-inspiration"><?php echo esc_html__('Site inspiration', 'oxyai-oxygen'); ?></label>
+                        <select id="oxyai-site-inspiration">
+                            <option value=""><?php echo esc_html__('No inspiration', 'oxyai-oxygen'); ?></option>
+                            <?php foreach ($inspirations as $inspiration): ?>
+                                <option value="<?php echo esc_attr((string) ($inspiration['slug'] ?? '')); ?>"><?php echo esc_html((string) ($inspiration['name'] ?? 'Inspiration')); ?> - <?php echo esc_html((string) ($inspiration['description'] ?? '')); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+
                         <label for="oxyai-prompt"><?php echo esc_html__('Prompt for AI generation', 'oxyai-oxygen'); ?></label>
                         <textarea id="oxyai-prompt" class="oxyai-textarea oxyai-textarea-small" placeholder="<?php echo esc_attr__('Example: Create a premium hero section for a roofing company with a CTA and three trust points.', 'oxyai-oxygen'); ?>"></textarea>
+
+                        <div id="oxyai-plan" class="oxyai-plan" hidden></div>
+                        <div id="oxyai-variants" class="oxyai-variants" hidden></div>
 
                         <div class="oxyai-source-tabs" role="tablist" aria-label="<?php echo esc_attr__('Source fields', 'oxyai-oxygen'); ?>">
                             <button type="button" class="is-active" data-oxyai-tab="html">HTML</button>

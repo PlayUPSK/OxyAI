@@ -22,6 +22,9 @@ This is one installable plugin. The converter kernel is vendored inside this plu
 - Strict source-bundle validation before conversion.
 - Opt-in history store.
 - Design presets.
+- Plan Mode for clarifying questions before generation.
+- Triple Shot generation for three alternate source-bundle directions.
+- First-party site inspiration directions for prompt steering.
 - MCP-style REST tool endpoint for remote conversion workflows.
 - Codex bridge tools for prompt instructions, page lookup, page context, staging generated payloads, direct page insertion, dry-run, and backup restore.
 - MCP/Codex token is generated automatically and can be regenerated from the setup panel.
@@ -45,10 +48,11 @@ The MCP token is generated automatically in `Tools -> OxyAI Oxygen`. Connect Cod
 Codex workflow:
 
 1. Call `get_prompt_instructions`.
-2. Call `list_oxygen_pages` or `get_page_context`.
-3. Generate HTML/CSS/JS for the target page.
-4. For review inside Oxygen, call `convert_and_stage_page` with `postId`, `html`, `css`, and optional `js`.
-5. For direct insertion, call `apply_html_to_oxygen_page` with `dryRun=true`, then call it again with `dryRun=false` after approval.
-6. Use `list_oxygen_page_backups` and `restore_oxygen_page_backup` if you need to roll back a direct write.
+2. Optionally call `list_site_inspirations`, `plan_generation`, or `triple_shot_generation`.
+3. Call `list_oxygen_pages` or `get_page_context`.
+4. Generate HTML/CSS/JS for the target page.
+5. For review inside Oxygen, call `convert_and_stage_page` with `postId`, `html`, `css`, and optional `js`.
+6. For direct insertion, call `apply_html_to_oxygen_page` with `dryRun=true`, then call it again with `dryRun=false` after approval.
+7. Use `list_oxygen_page_backups` and `restore_oxygen_page_backup` if you need to roll back a direct write.
 
 The admin composer also has a page picker. You can paste raw HTML/CSS/JS, choose a page, run Dry run, then Apply to page. OxyAI writes Oxygen data directly and creates a restore backup before changing the page.
