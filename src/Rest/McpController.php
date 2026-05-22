@@ -188,7 +188,7 @@ final class McpController
             $this->tool('get_oxygen_tree', 'Read the persisted Oxygen page tree, node count, next node id, and available OxyAI restore backups.', [
                 'postId' => ['type' => 'integer'],
             ], ['postId']),
-            $this->tool('apply_html_to_oxygen_page', 'Directly convert HTML/CSS/JS and apply it to a WordPress Oxygen page. Creates a restore backup unless dryRun is true.', [
+            $this->tool('apply_html_to_oxygen_page', 'Directly convert HTML/CSS/JS and apply it to a WordPress Oxygen page. WRITES TO THE LIVE PAGE — always call once with dryRun:true first to inspect the proposed tree unless the user has explicitly approved the content. A restore backup is created when dryRun is false, but treat direct writes as hard to reverse: verify the page renders after applying. Use append for new sections; replace_node for a selected element; replace only when overwriting the whole page is intended.', [
                 'postId' => ['type' => 'integer'],
                 'html' => ['type' => 'string'],
                 'css' => ['type' => 'string'],
@@ -198,7 +198,7 @@ final class McpController
                 'dryRun' => ['type' => 'boolean', 'description' => 'Return the proposed tree without saving.'],
                 'options' => ['type' => 'object'],
             ], ['postId', 'html']),
-            $this->tool('apply_oxygen_json_to_page', 'Directly apply a converted Oxygen rawJson/documentTree/element payload to a page. Creates a restore backup unless dryRun is true.', [
+            $this->tool('apply_oxygen_json_to_page', 'Directly apply a converted Oxygen rawJson/documentTree/element payload to a page. WRITES TO THE LIVE PAGE — always call once with dryRun:true first unless the user has explicitly approved the content. A restore backup is created when dryRun is false, but treat direct writes as hard to reverse: verify the page renders after applying. For replace_node, pass either a documentTree wrapper or a single node object with id, data, and children.', [
                 'postId' => ['type' => 'integer'],
                 'rawJson' => ['type' => 'string'],
                 'oxygen' => ['type' => 'object'],
