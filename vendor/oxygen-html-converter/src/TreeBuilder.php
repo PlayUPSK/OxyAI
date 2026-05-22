@@ -780,8 +780,9 @@ class TreeBuilder
         // Sorting ascending so the last applied (highest specificity, latest in
         // source) is the one whose values survive the merges.
         usort($matchedRules, static function (array $a, array $b): int {
-            if ($a['specificity'] !== $b['specificity']) {
-                return $a['specificity'] <=> $b['specificity'];
+            $specificityComparison = self::compareSpecificity($a['specificity'], $b['specificity']);
+            if ($specificityComparison !== 0) {
+                return $specificityComparison;
             }
             return $a['sourceOrder'] <=> $b['sourceOrder'];
         });
@@ -791,9 +792,11 @@ class TreeBuilder
         $propertyOrigins = [];
 
         foreach ($matchedRules as $rule) {
+            $specificity = self::formatSpecificity($rule['specificity']);
+
             $this->logDebug(sprintf(
-                'Applying styles (specificity=%d, selector=%s): %s',
-                $rule['specificity'],
+                'Applying styles (specificity=%s, selector=%s): %s',
+                $specificity,
                 $rule['selector'],
                 json_encode($rule['convertedStyles'])
             ));
@@ -812,12 +815,12 @@ class TreeBuilder
                 $existing = $propertyOrigins[$property] ?? null;
                 if ($existing !== null && $existing['value'] !== $serializedValue) {
                     $this->report->addWarning(sprintf(
-                        'CSS specificity conflict on element %s for property "%s": "%s" from %s (specificity %d) overrode "%s" from %s (specificity %d). Verify the resolved value matches your intent.',
+                        'CSS specificity conflict on element %s for property "%s": "%s" from %s (specificity %s) overrode "%s" from %s (specificity %s). Verify the resolved value matches your intent.',
                         $elementType,
                         $property,
                         $serializedValue,
                         $rule['selector'],
-                        $rule['specificity'],
+                        $specificity,
                         $existing['value'],
                         $existing['selector'],
                         $existing['specificity']
@@ -825,7 +828,7 @@ class TreeBuilder
                 }
                 $propertyOrigins[$property] = [
                     'selector' => $rule['selector'],
-                    'specificity' => $rule['specificity'],
+                    'specificity' => $specificity,
                     'value' => $serializedValue,
                 ];
             }
@@ -836,30 +839,56 @@ class TreeBuilder
 
     /**
      * CSS specificity per https://www.w3.org/TR/selectors-4/#specificity
-     * Encoded into one comparable int: a * 10000 + b * 100 + c.
+     *
+     * @return array{a:int,b:int,c:int}
      */
-    private function computeSelectorSpecificity(string $selector): int
+    private function computeSelectorSpecificity(string $selector): array
     {
         $normalized = (string) preg_replace('/\s*[>+~,]\s*/', ' ', $selector);
+        $identifier = '(?:-?[_a-zA-Z]|\\\\[0-9a-fA-F]{1,6}\s?|\\\\.)[_a-zA-Z0-9-]*';
 
-        $ids = preg_match_all('/#[a-zA-Z][\w-]*/', $normalized);
-        $classes = preg_match_all('/\.[a-zA-Z][\w-]*/', $normalized);
         $attributes = preg_match_all('/\[[^\]]+\]/', $normalized);
-        $pseudoClasses = preg_match_all('/(?<!:):[a-zA-Z][\w-]*(?:\([^)]*\))?/', $normalized);
-        $pseudoElements = preg_match_all('/::[a-zA-Z][\w-]*/', $normalized);
+        $withoutAttributes = (string) preg_replace('/\[[^\]]+\]/', ' ', $normalized);
 
-        $stripped = $normalized;
-        $stripped = (string) preg_replace('/#[a-zA-Z][\w-]*/', ' ', $stripped);
-        $stripped = (string) preg_replace('/\.[a-zA-Z][\w-]*/', ' ', $stripped);
-        $stripped = (string) preg_replace('/\[[^\]]+\]/', ' ', $stripped);
-        $stripped = (string) preg_replace('/::?[a-zA-Z][\w-]*(?:\([^)]*\))?/', ' ', $stripped);
-        $elements = preg_match_all('/[a-zA-Z][\w-]*/', $stripped);
+        $ids = preg_match_all('/#' . $identifier . '/', $withoutAttributes);
+        $classes = preg_match_all('/\.' . $identifier . '/', $withoutAttributes);
+        $pseudoClasses = preg_match_all('/(?<!:):' . $identifier . '(?:\([^)]*\))?/', $withoutAttributes);
+        $pseudoElements = preg_match_all('/::' . $identifier . '/', $withoutAttributes);
+
+        $stripped = $withoutAttributes;
+        $stripped = (string) preg_replace('/#' . $identifier . '/', ' ', $stripped);
+        $stripped = (string) preg_replace('/\.' . $identifier . '/', ' ', $stripped);
+        $stripped = (string) preg_replace('/::?' . $identifier . '(?:\([^)]*\))?/', ' ', $stripped);
+        $elements = preg_match_all('/' . $identifier . '/', $stripped);
 
         $a = (int) $ids;
         $b = (int) ($classes + $attributes + $pseudoClasses);
         $c = (int) ($elements + $pseudoElements);
 
-        return $a * 10000 + $b * 100 + $c;
+        return ['a' => $a, 'b' => $b, 'c' => $c];
+    }
+
+    /**
+     * @param array{a:int,b:int,c:int} $left
+     * @param array{a:int,b:int,c:int} $right
+     */
+    private static function compareSpecificity(array $left, array $right): int
+    {
+        foreach (['a', 'b', 'c'] as $part) {
+            if ($left[$part] !== $right[$part]) {
+                return $left[$part] <=> $right[$part];
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * @param array{a:int,b:int,c:int} $specificity
+     */
+    private static function formatSpecificity(array $specificity): string
+    {
+        return sprintf('%d,%d,%d', $specificity['a'], $specificity['b'], $specificity['c']);
     }
 
     /**
