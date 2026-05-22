@@ -31,9 +31,9 @@ final class PromptInstructionService
                 'If styles use media queries, pseudo selectors, keyframes, or complex selectors, keep them in CSS so the converter can preserve them in CSS Code.',
                 'Use dryRun=true before direct page writes when the user has not explicitly approved applying content.',
                 'Prefer append for new sections, replace_node for selected static elements, and replace only when the user explicitly wants to overwrite the page tree.',
-                'Always send non-ASCII characters as JSON unicode escapes (for example, \\u00E4; use surrogate pairs for non-BMP characters). Do not send raw UTF-8 bytes in html, css, js, or oxygen fields — downstream storage can double-encode them and corrupt diacritics.',
-                'Put all component-level CSS inside a <style> block in the html field, or in the css field. Do not assume element design properties will be compiled to the generated Oxygen stylesheet — keep authoritative rules in CSS Code.',
-                'After any apply_html_to_oxygen_page or apply_oxygen_json_to_page call, re-fetch get_oxygen_tree and, when possible, verify the page renders before reporting success. Treat apply_* as hard to reverse: confirm a clean backup exists in list_oxygen_page_backups first.',
+                'Always send non-ASCII characters as JSON unicode escapes (for example, \\u00E4; use surrogate pairs for non-BMP characters). Do not send raw UTF-8 bytes in html, css, js, or oxygen fields - downstream storage can double-encode them and corrupt diacritics.',
+                'Use the css field as the authoritative location for component CSS. Use a <style> block in html only when preserving imported markup that already contains one. Do not assume element design properties will be compiled to the generated Oxygen stylesheet - keep authoritative rules in CSS Code.',
+                'After any apply_html_to_oxygen_page or apply_oxygen_json_to_page call, re-fetch get_oxygen_tree and, when possible, verify the page renders before reporting success. Direct writes create a restore backup unless dryRun is true; after applying, verify the new backup appears in list_oxygen_page_backups and capture its id.',
             ],
             'mcpWorkflow' => [
                 'Inspect pages with list_oxygen_pages and get_page_context.',
