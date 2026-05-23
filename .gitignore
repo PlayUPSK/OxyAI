@@ -2,6 +2,10 @@
 IMPLEMENTATION_PLAN.md
 deep-research-report.md
 
+# Local MCP scratch scripts (contain live-site tokens — never commit)
+.tmp-mcp/
+page.html
+
 # OS junk
 .DS_Store
 Thumbs.db

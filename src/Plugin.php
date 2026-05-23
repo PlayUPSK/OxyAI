@@ -12,6 +12,7 @@ use OxyAI\Oxygen\Ai\StructuredOutputValidator;
 use OxyAI\Oxygen\Ai\TripleShotService;
 use OxyAI\Oxygen\Assets\AssetLoader;
 use OxyAI\Oxygen\Codex\PageContextService;
+use OxyAI\Oxygen\Codex\OxygenElementCapabilityService;
 use OxyAI\Oxygen\Codex\PromptInstructionService;
 use OxyAI\Oxygen\Conversion\ConverterKernelAdapter;
 use OxyAI\Oxygen\History\HistoryStore;
@@ -51,7 +52,8 @@ final class Plugin
         $planMode = new PlanModeService($aiGateway, $presets, $inspirations);
         $tripleShot = new TripleShotService($aiGateway);
         $pageContext = new PageContextService();
-        $promptInstructions = new PromptInstructionService($presets, $inspirations);
+        $elementCapabilities = new OxygenElementCapabilityService();
+        $promptInstructions = new PromptInstructionService($presets, $inspirations, $elementCapabilities);
         $pageMutations = new OxygenPageMutationService();
 
         (new AdminPage($settings, $presets, $inspirations, $capabilities))->register();
@@ -59,7 +61,7 @@ final class Plugin
         (new ConvertController($capabilities, $converter))->register();
         (new AiController($capabilities, $aiGateway, $converter, $history, $planMode, $tripleShot, $inspirations))->register();
         (new HistoryController($capabilities, $history, $presets))->register();
-        (new McpController($capabilities, $converter, $aiGateway, $presets, pageMutations: $pageMutations, planMode: $planMode, tripleShot: $tripleShot, inspirations: $inspirations))->register();
+        (new McpController($capabilities, $converter, $aiGateway, $presets, pageMutations: $pageMutations, planMode: $planMode, tripleShot: $tripleShot, inspirations: $inspirations, elementCapabilities: $elementCapabilities))->register();
         (new CodexController($capabilities, $promptInstructions, $pageContext, $converter, $pageMutations))->register();
 
         add_action('admin_notices', [$this, 'showOxygenNotice']);

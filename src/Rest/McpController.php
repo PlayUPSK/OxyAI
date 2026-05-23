@@ -6,6 +6,7 @@ namespace OxyAI\Oxygen\Rest;
 
 use OxyAI\Oxygen\Ai\AiGateway;
 use OxyAI\Oxygen\Builder\BuilderInsertionService;
+use OxyAI\Oxygen\Codex\OxygenElementCapabilityService;
 use OxyAI\Oxygen\Codex\PageContextService;
 use OxyAI\Oxygen\Codex\PromptInstructionService;
 use OxyAI\Oxygen\Conversion\ConverterKernelAdapter;
@@ -32,11 +33,12 @@ final class McpController
         private readonly ?PlanModeService $planMode = null,
         private readonly ?TripleShotService $tripleShot = null,
         private readonly SiteInspirationStore $inspirations = new SiteInspirationStore(),
+        private readonly OxygenElementCapabilityService $elementCapabilities = new OxygenElementCapabilityService(),
         private readonly BuilderInsertionService $insertionService = new BuilderInsertionService(),
         private ?PromptInstructionService $instructions = null,
         private ?PageContextService $pages = null
     ) {
-        $this->instructions = $this->instructions ?: new PromptInstructionService($this->presets, $this->inspirations);
+        $this->instructions = $this->instructions ?: new PromptInstructionService($this->presets, $this->inspirations, $this->elementCapabilities);
         $this->pages = $this->pages ?: new PageContextService();
     }
 
@@ -255,6 +257,9 @@ final class McpController
             ),
             'list_design_presets' => ['success' => true, 'presets' => $this->presets->all()],
             'list_site_inspirations' => ['success' => true, 'siteInspirations' => $this->inspirations->all()],
+            'list_oxygen_element_capabilities' => $this->elementCapabilities->all(
+                is_scalar($input['elementType'] ?? null) ? (string) $input['elementType'] : null
+            ),
             'plan_generation' => $this->planGeneration($input),
             'triple_shot_generation' => $this->tripleShotGeneration($input),
             'generate_html_css_js' => $this->aiGateway->generate($input),
@@ -354,6 +359,9 @@ final class McpController
             ]),
             $this->tool('list_design_presets', 'List design presets available to OxyAI.', []),
             $this->tool('list_site_inspirations', 'List first-party OxyAI site inspiration directions for generation prompts.', []),
+            $this->tool('list_oxygen_element_capabilities', 'List Oxygen 6 and Breakdance Elements for Oxygen styling capabilities. Use this before deciding which CSS can become native design properties and which CSS must stay in class/CssCode fallback.', [
+                'elementType' => ['type' => 'string', 'description' => 'Optional full element type, for example OxygenElements\\\\Container or EssentialElements\\\\Button.'],
+            ]),
         ];
 
         if ($this->planMode !== null) {
