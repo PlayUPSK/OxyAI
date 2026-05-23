@@ -501,6 +501,7 @@ class TreeBuilder
             $this->processClasses($node, $element);
             $this->processId($node, $element);
             $this->interactionDetector->processCustomAttributes($node, $element);
+            $this->preserveUnsupportedInlineStyle($node, $element, ElementTypes::HTML_CODE);
             return $element;
         }
 
@@ -522,8 +523,11 @@ class TreeBuilder
         $contentProperties = $this->mapper->buildProperties($node);
 
         // Extract and convert inline style attributes only when inline style mode is enabled.
-        $styleProperties = $this->inlineStyles
+        $convertedInlineStyles = $this->inlineStyles
             ? $this->styleExtractor->extractAndConvert($node, $elementType)
+            : [];
+        $styleProperties = $convertedInlineStyles !== []
+            ? ['design' => $convertedInlineStyles]
             : [];
 
         // Merge properties
@@ -630,6 +634,7 @@ class TreeBuilder
 
         // Process custom attributes (data-*, aria-*, onclick, etc.)
         $this->interactionDetector->processCustomAttributes($node, $element);
+        $this->preserveUnsupportedInlineStyle($node, $element, $elementType);
 
         // Detect frameworks and add warnings
         $this->frameworkDetector->detect($node);
@@ -1079,6 +1084,38 @@ class TreeBuilder
     private function mergeProperties(array $content, array $styles): array
     {
         return $this->mergeAssociativeProperties($content, $styles);
+    }
+
+    private function preserveUnsupportedInlineStyle(\DOMElement $node, array &$element, string $elementType): void
+    {
+        if (!$this->inlineStyles || !$node->hasAttribute('style')) {
+            return;
+        }
+
+        $style = trim($node->getAttribute('style'));
+        if ($style === '') {
+            return;
+        }
+
+        $styles = $this->styleExtractor->parseInlineStyles($style);
+        if ($this->styleExtractor->supportsDeclarationsFully($styles, $elementType)) {
+            return;
+        }
+
+        $element['data']['properties']['settings'] = $element['data']['properties']['settings'] ?? [];
+        $element['data']['properties']['settings']['advanced'] = $element['data']['properties']['settings']['advanced'] ?? [];
+        $element['data']['properties']['settings']['advanced']['attributes'] = $element['data']['properties']['settings']['advanced']['attributes'] ?? [];
+
+        foreach ($element['data']['properties']['settings']['advanced']['attributes'] as $attribute) {
+            if (($attribute['name'] ?? null) === 'style') {
+                return;
+            }
+        }
+
+        $element['data']['properties']['settings']['advanced']['attributes'][] = [
+            'name' => 'style',
+            'value' => $style,
+        ];
     }
 
     /**

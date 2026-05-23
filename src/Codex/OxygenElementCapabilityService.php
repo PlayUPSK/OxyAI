@@ -196,7 +196,8 @@ final class OxygenElementCapabilityService
                 'Breakdance Elements for Oxygen button. Use only when the plugin and contract are available.',
                 ['button', 'size', 'typography', 'layout', 'position', 'effects', 'overflow'],
                 array_merge($sharedBoxStyles, $typographyStyles, $sizeStyles, $layoutStyles, $positionStyles, $effectStyles, $overflowStyles),
-                ['requiresBreakdanceElementsForOxygen' => true]
+                ['requiresBreakdanceElementsForOxygen' => true],
+                'button'
             ),
         ];
     }
@@ -212,7 +213,8 @@ final class OxygenElementCapabilityService
         string $description,
         array $designBuckets,
         array $nativeCssProperties,
-        array $extra = []
+        array $extra = [],
+        string $boxCategory = 'container'
     ): array {
         return array_merge([
             'type' => $type,
@@ -223,8 +225,8 @@ final class OxygenElementCapabilityService
                 'breakpoint' => 'breakpoint_base',
                 'length' => ['number' => 'int|float', 'unit' => 'px|%|rem|em|vh|vw|...', 'style' => 'original CSS length'],
                 'color' => 'string',
-                'radius' => 'container.borders.radius.breakpoint_base.{all,topLeft,topRight,bottomLeft,bottomRight,editMode}',
-                'spacing' => 'container.padding|margin.breakpoint_base.{top,right,bottom,left}',
+                'radius' => $boxCategory . '.borders.radius.breakpoint_base.{all,topLeft,topRight,bottomLeft,bottomRight,editMode}',
+                'spacing' => $boxCategory . '.padding|margin.breakpoint_base.{top,right,bottom,left}',
                 'layout' => 'layout.{property}.breakpoint_base',
                 'position' => 'position.{property}.breakpoint_base',
                 'effects' => 'effects.{property}.breakpoint_base',

@@ -27,6 +27,7 @@ $oxyaiOxygenExpectedConstants = [
 ];
 
 $oxyaiOxygenConstantMismatches = [];
+$oxyaiOxygenCriticalMismatches = [];
 foreach ($oxyaiOxygenExpectedConstants as $constant => $expected) {
     if (!defined($constant)) {
         define($constant, $expected);
@@ -36,11 +37,15 @@ foreach ($oxyaiOxygenExpectedConstants as $constant => $expected) {
     $actual = constant($constant);
     if (!is_string($actual) || $actual === '') {
         $oxyaiOxygenConstantMismatches[] = $constant;
+        if (in_array($constant, ['OXYAI_OXYGEN_VERSION', 'OXYAI_OXYGEN_PATH', 'OXYAI_OXYGEN_URL'], true)) {
+            $oxyaiOxygenCriticalMismatches[] = $constant;
+        }
         continue;
     }
 
     if (in_array($constant, ['OXYAI_OXYGEN_VERSION', 'OXYAI_OXYGEN_PATH', 'OXYAI_OXYGEN_URL'], true) && $actual !== $expected) {
         $oxyaiOxygenConstantMismatches[] = $constant;
+        $oxyaiOxygenCriticalMismatches[] = $constant;
     }
 }
 
@@ -51,6 +56,10 @@ if ($oxyaiOxygenConstantMismatches !== []) {
             implode(', ', $oxyaiOxygenConstantMismatches)
         )) . '</p></div>';
     });
+}
+
+if ($oxyaiOxygenCriticalMismatches !== []) {
+    return;
 }
 
 require_once OXYAI_OXYGEN_PATH . 'vendor/oxygen-html-converter/src/polyfills.php';

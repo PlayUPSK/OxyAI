@@ -87,6 +87,12 @@ class StyleExtractor
         'aspect-ratio' => true,
     ];
 
+    private const UNSUPPORTED_NATIVE_ELEMENT_TYPES = [
+        ElementTypes::HTML_CODE => true,
+        ElementTypes::CSS_CODE => true,
+        ElementTypes::JAVASCRIPT_CODE => true,
+    ];
+
     /**
      * Extract styles from DOM element
      */
@@ -164,9 +170,13 @@ class StyleExtractor
      */
     public function supportsDeclarationsFully(array $styles, string $elementType = ElementTypes::CONTAINER): bool
     {
+        if (isset(self::UNSUPPORTED_NATIVE_ELEMENT_TYPES[$elementType])) {
+            return false;
+        }
+
         $supportedDeclarationCount = 0;
 
-        foreach (array_keys($styles) as $cssProp) {
+        foreach ($styles as $cssProp => $value) {
             $cssProp = strtolower((string) $cssProp);
 
             if (strpos($cssProp, '_') === 0) {
@@ -174,7 +184,9 @@ class StyleExtractor
             }
 
             $supportedDeclarationCount++;
-            if (!isset(self::SUPPORTED_PROPERTIES[$cssProp])) {
+            if (!isset(self::SUPPORTED_PROPERTIES[$cssProp])
+                || !$this->canConvertCssPropertyValue($cssProp, (string) $value)
+            ) {
                 return false;
             }
         }
@@ -189,7 +201,14 @@ class StyleExtractor
             return;
         }
 
-        if ($cssProp === 'background' || $cssProp === 'background-color') {
+        if ($cssProp === 'background') {
+            if ($this->isPlainBackgroundColor($value)) {
+                $this->setBreakpointValue($properties, [$boxCategory, 'background'], $this->normalizeColor($value));
+            }
+            return;
+        }
+
+        if ($cssProp === 'background-color') {
             $this->setBreakpointValue($properties, [$boxCategory, 'background'], $this->normalizeColor($value));
             return;
         }
@@ -232,13 +251,10 @@ class StyleExtractor
         }
 
         if ($cssProp === 'border-radius') {
-            $this->setBorderRadius($properties, $boxCategory, [
-                'all' => $value,
-                'topLeft' => $value,
-                'topRight' => $value,
-                'bottomLeft' => $value,
-                'bottomRight' => $value,
-            ]);
+            $corners = $this->parseRadiusShorthand($value);
+            if ($corners !== null) {
+                $this->setBorderRadius($properties, $boxCategory, $corners, true);
+            }
             return;
         }
 
@@ -330,7 +346,7 @@ class StyleExtractor
     /**
      * @param array<string, string> $corners
      */
-    private function setBorderRadius(array &$properties, string $boxCategory, array $corners): void
+    private function setBorderRadius(array &$properties, string $boxCategory, array $corners, bool $fromShorthand = false): void
     {
         $path = [$boxCategory, 'borders', 'radius', self::BREAKPOINT];
         $existing = $this->getNestedValue($properties, $path);
@@ -340,10 +356,23 @@ class StyleExtractor
             $radius[$corner] = $this->normalizeLength($value);
         }
 
-        if (isset($corners['all'])) {
-            $radius['editMode'] = 'all';
+        if ($fromShorthand) {
+            $cornerValues = [
+                (string) ($corners['topLeft'] ?? ''),
+                (string) ($corners['topRight'] ?? ''),
+                (string) ($corners['bottomRight'] ?? ''),
+                (string) ($corners['bottomLeft'] ?? ''),
+            ];
+            $allEqual = count(array_unique($cornerValues)) === 1;
+            if ($allEqual) {
+                $radius['all'] = $this->normalizeLength($cornerValues[0]);
+            } else {
+                unset($radius['all']);
+            }
+            $radius['editMode'] = $allEqual ? 'all' : 'advanced';
         } else {
-            $radius['editMode'] = $radius['editMode'] ?? 'advanced';
+            unset($radius['all']);
+            $radius['editMode'] = 'advanced';
         }
 
         $this->setNestedValue($properties, $path, $radius);
@@ -391,7 +420,7 @@ class StyleExtractor
      */
     public function parseShorthandSpacing(string $value): array
     {
-        $parts = preg_split('/\s+/', trim($value));
+        $parts = $this->splitCssTokens($value);
         $result = [];
 
         switch (count($parts)) {
@@ -430,6 +459,130 @@ class StyleExtractor
         }
 
         return $result;
+    }
+
+    /**
+     * @return array<string, string>|null
+     */
+    private function parseRadiusShorthand(string $value): ?array
+    {
+        if (str_contains($value, '/')) {
+            return null;
+        }
+
+        $parts = $this->splitCssTokens($value);
+        if (count($parts) < 1 || count($parts) > 4) {
+            return null;
+        }
+
+        return match (count($parts)) {
+            1 => [
+                'topLeft' => $parts[0],
+                'topRight' => $parts[0],
+                'bottomRight' => $parts[0],
+                'bottomLeft' => $parts[0],
+            ],
+            2 => [
+                'topLeft' => $parts[0],
+                'topRight' => $parts[1],
+                'bottomRight' => $parts[0],
+                'bottomLeft' => $parts[1],
+            ],
+            3 => [
+                'topLeft' => $parts[0],
+                'topRight' => $parts[1],
+                'bottomRight' => $parts[2],
+                'bottomLeft' => $parts[1],
+            ],
+            default => [
+                'topLeft' => $parts[0],
+                'topRight' => $parts[1],
+                'bottomRight' => $parts[2],
+                'bottomLeft' => $parts[3],
+            ],
+        };
+    }
+
+    /**
+     * Split CSS shorthand tokens on whitespace outside functional values.
+     *
+     * @return array<int, string>
+     */
+    private function splitCssTokens(string $value): array
+    {
+        $tokens = [];
+        $buffer = '';
+        $depth = 0;
+        $length = strlen($value);
+
+        for ($i = 0; $i < $length; $i++) {
+            $char = $value[$i];
+
+            if ($char === '(') {
+                $depth++;
+                $buffer .= $char;
+                continue;
+            }
+
+            if ($char === ')' && $depth > 0) {
+                $depth--;
+                $buffer .= $char;
+                continue;
+            }
+
+            if (ctype_space($char) && $depth === 0) {
+                if ($buffer !== '') {
+                    $tokens[] = $buffer;
+                    $buffer = '';
+                }
+                continue;
+            }
+
+            $buffer .= $char;
+        }
+
+        if ($buffer !== '') {
+            $tokens[] = $buffer;
+        }
+
+        return $tokens;
+    }
+
+    private function canConvertCssPropertyValue(string $cssProp, string $value): bool
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return false;
+        }
+
+        if ($cssProp === 'background') {
+            return $this->isPlainBackgroundColor($value);
+        }
+
+        if ($cssProp === 'padding' || $cssProp === 'margin') {
+            $parts = $this->splitCssTokens($value);
+            return count($parts) >= 1 && count($parts) <= 4;
+        }
+
+        if ($cssProp === 'border-radius') {
+            return $this->parseRadiusShorthand($value) !== null;
+        }
+
+        return true;
+    }
+
+    private function isPlainBackgroundColor(string $value): bool
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return false;
+        }
+
+        if (preg_match('/\b(?:url|image-set|linear-gradient|radial-gradient|conic-gradient|repeating-linear-gradient|repeating-radial-gradient)\s*\(/i', $value)) {
+            return false;
+        }
+
+        return preg_match('/^(?:#[0-9a-f]{3,8}|rgba?\([^)]+\)|hsla?\([^)]+\)|var\([^)]+\)|[a-z]+)$/i', $value) === 1;
     }
 
     /**
