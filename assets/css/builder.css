@@ -1,581 +1,1036 @@
+/*
+ * OxyAI builder overlay
+ * Goals: focused side panel, 3 clear modes, one primary action per mode.
+ */
+
+/* ===== DESIGN TOKENS (scoped to the overlay) ===== */
+
+.ox-overlay {
+  --ox-bg: #ffffff;
+  --ox-surface: #ffffff;
+  --ox-surface-alt: #f4f6fa;
+  --ox-surface-inset: #fbfcfe;
+  --ox-border: rgba(15, 23, 42, 0.08);
+  --ox-border-strong: rgba(15, 23, 42, 0.14);
+  --ox-text: #0f172a;
+  --ox-text-soft: #475569;
+  --ox-text-muted: #94a3b8;
+  --ox-brand: #2563eb;
+  --ox-brand-soft: rgba(37, 99, 235, 0.08);
+  --ox-brand-strong: #1d4ed8;
+  --ox-brand-ring: rgba(37, 99, 235, 0.22);
+  --ox-success: #059669;
+  --ox-success-soft: rgba(5, 150, 105, 0.1);
+  --ox-warning: #b45309;
+  --ox-danger: #b91c1c;
+  --ox-danger-soft: rgba(185, 28, 28, 0.08);
+
+  --ox-radius-sm: 8px;
+  --ox-radius: 12px;
+  --ox-radius-lg: 16px;
+  --ox-radius-pill: 999px;
+  --ox-shadow: 0 1px 3px rgba(15, 23, 42, 0.05), 0 4px 12px rgba(15, 23, 42, 0.04);
+  --ox-shadow-lg: -24px 0 48px rgba(15, 23, 42, 0.16), -8px 0 24px rgba(15, 23, 42, 0.08);
+  --ox-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --ox-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+  --ox-mono: "SF Mono", "JetBrains Mono", Consolas, Menlo, "Roboto Mono", monospace;
+}
+
+/* ===== LAUNCHER ===== */
+
 #oxyai-builder-launch {
   position: fixed;
-  right: 18px;
-  bottom: 18px;
-  z-index: 999997;
+  right: 22px;
+  bottom: 22px;
+  z-index: 2147483646;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  height: 46px;
+  padding: 0 18px 0 14px;
   border: 0;
-  border-radius: 8px;
-  padding: 10px 14px;
-  background: #155eef;
+  border-radius: 24px;
+  background: linear-gradient(135deg, #2563eb 0%, #0f766e 100%);
   color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+  font-size: 13.5px;
   font-weight: 700;
+  letter-spacing: 0;
   cursor: pointer;
-  box-shadow: 0 12px 28px rgba(17, 24, 39, 0.22);
+  box-shadow: 0 8px 22px rgba(37, 99, 235, 0.36), 0 2px 6px rgba(15, 23, 42, 0.12);
+  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.oxyai-builder-overlay {
+#oxyai-builder-launch::before {
+  content: "";
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M12 2 9.2 9.2 2 12l7.2 2.8L12 22l2.8-7.2L22 12l-7.2-2.8z'/></svg>") center/contain no-repeat;
+}
+
+#oxyai-builder-launch:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.42), 0 4px 8px rgba(15, 23, 42, 0.14);
+}
+
+#oxyai-builder-launch:active {
+  transform: translateY(0);
+}
+
+/* ===== OVERLAY + PANEL ===== */
+
+.ox-overlay {
   position: fixed;
   inset: 0;
-  z-index: 999998;
+  z-index: 2147483647;
   pointer-events: none;
-  background: transparent;
 }
 
-.oxyai-builder-dialog {
-  position: fixed;
+.ox-overlay[hidden] {
+  display: none;
+}
+
+.ox-overlay__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.36);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  opacity: 0;
+  pointer-events: auto;
+  transition: opacity 220ms var(--ox-ease);
+}
+
+.ox-overlay.is-open .ox-overlay__backdrop {
+  opacity: 1;
+}
+
+.ox-panel {
+  position: absolute;
   top: 0;
   right: 0;
-  width: min(460px, 94vw);
+  display: flex;
+  flex-direction: column;
+  width: min(440px, 96vw);
   height: 100vh;
   max-height: 100vh;
-  overflow: auto;
-  padding: 22px;
-  border-left: 1px solid #d8dee8;
-  border-radius: 0;
-  background: #fff;
-  color: #111827 !important;
+  background: var(--ox-surface);
+  color: var(--ox-text);
+  font-family: var(--ox-font);
+  font-size: 13.5px;
+  line-height: 1.5;
+  box-shadow: var(--ox-shadow-lg);
+  transform: translateX(100%);
+  transition: transform 280ms var(--ox-ease);
   pointer-events: auto;
-  box-shadow: -18px 0 42px rgba(15, 23, 42, 0.18);
+  overflow: hidden;
 }
 
-.oxyai-builder-head,
-.oxyai-builder-actions,
-.oxyai-builder-options,
-.oxyai-builder-modes {
+.ox-overlay.is-open .ox-panel {
+  transform: translateX(0);
+}
+
+.ox-panel * {
+  box-sizing: border-box;
+}
+
+/* ===== HEAD ===== */
+
+.ox-panel__head {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
   justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--ox-border);
+  flex-shrink: 0;
 }
 
-.oxyai-builder-head p {
-  margin: 0 0 4px;
-  color: #155eef;
-  font-size: 12px;
+.ox-panel__brand {
+  display: flex;
+  gap: 11px;
+  align-items: center;
+}
+
+.ox-panel__mark {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #2563eb 0%, #0f766e 100%);
+  color: #fff;
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.ox-panel__eyebrow {
+  margin: 0;
+  color: var(--ox-text-muted);
+  font-size: 10.5px;
   font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.oxyai-builder-head h2 {
+.ox-panel__title {
   margin: 0;
-}
-
-.oxyai-builder-head button {
-  border: 0;
-  background: transparent;
-  font-size: 26px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.oxyai-builder-modes {
-  justify-content: flex-start;
-  flex-wrap: wrap;
-  margin-top: 16px;
-  padding: 6px;
-  border: 1px solid #d8dee8;
-  border-radius: 8px;
-  background: #f6f8fb;
-}
-
-.oxyai-builder-modes button {
-  border: 0;
-  border-radius: 7px;
-  padding: 8px 11px;
-  background: transparent;
-  color: #5b6678;
-  cursor: pointer;
+  color: var(--ox-text);
+  font-size: 15px;
   font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.2;
 }
 
-.oxyai-builder-modes button.is-active {
-  background: #155eef;
+.ox-panel__close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ox-text-soft);
+  cursor: pointer;
+  transition: background-color 140ms var(--ox-ease), color 140ms var(--ox-ease);
+}
+
+.ox-panel__close:hover {
+  background: var(--ox-surface-alt);
+  color: var(--ox-text);
+}
+
+.ox-panel__close::before {
+  content: "×";
+  font-size: 22px;
+  line-height: 1;
+}
+
+/* ===== MODE TABS ===== */
+
+.ox-modes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--ox-border);
+  flex-shrink: 0;
+}
+
+.ox-mode-tab {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: var(--ox-surface-alt);
+  color: var(--ox-text-soft);
+  font-family: var(--ox-font);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 160ms var(--ox-ease), color 160ms var(--ox-ease),
+    border-color 160ms var(--ox-ease);
+}
+
+.ox-mode-tab:hover {
+  background: rgba(15, 23, 42, 0.05);
+  color: var(--ox-text);
+}
+
+.ox-mode-tab.is-active {
+  background: var(--ox-brand);
   color: #fff;
 }
 
-.oxyai-builder-help {
-  margin: 12px 0 0;
-  color: #5b6678;
+.ox-mode-tab__icon {
+  font-size: 14px;
+  line-height: 1;
 }
 
-.oxyai-builder-direction {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: end;
-  margin-top: 14px;
-}
+/* ===== BODY ===== */
 
-.oxyai-builder-direction label {
-  margin: 0;
-}
-
-.oxyai-builder-direction select,
-.oxyai-builder-direction button {
-  width: 100%;
-  border: 1px solid #d8dee8;
-  border-radius: 8px;
-  padding: 8px 10px;
-  background: #fff;
-}
-
-.oxyai-builder-direction > div {
+.ox-panel__body {
+  flex: 1;
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  padding: 18px 20px;
+  overflow-y: auto;
+  gap: 14px;
 }
 
-.oxyai-builder-direction button {
-  border-color: #155eef;
-  color: #155eef;
-  cursor: pointer;
-  font-weight: 700;
+.ox-panel__body::-webkit-scrollbar {
+  width: 8px;
 }
 
-.oxyai-builder-plan,
-.oxyai-builder-variants {
+.ox-panel__body::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.12);
+}
+
+.ox-panel__body::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.18);
+}
+
+.ox-mode-panel {
   display: grid;
-  gap: 10px;
-  margin-top: 14px;
-  padding: 12px;
-  border: 1px solid #dbeafe;
-  border-radius: 8px;
-  background: #f8fbff;
+  gap: 14px;
 }
 
-.oxyai-builder-plan[hidden],
-.oxyai-builder-variants[hidden] {
+.ox-mode-panel[hidden] {
   display: none;
 }
 
-.oxyai-builder-plan p {
-  margin: 0;
-  color: #5b6678;
-}
+/* ===== FIELDS ===== */
 
-.oxyai-builder-plan section {
+.ox-field {
   display: grid;
   gap: 7px;
-  padding: 10px;
-  border: 1px solid #d8dee8;
-  border-radius: 8px;
-  background: #fff;
 }
 
-.oxyai-builder-plan section span {
-  font-weight: 700;
+.ox-field__label {
+  color: var(--ox-text);
+  font-size: 12.5px;
+  font-weight: 600;
 }
 
-.oxyai-builder-plan section div {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-}
-
-.oxyai-builder-plan section label {
-  display: inline-flex;
-  gap: 7px;
-  align-items: center;
+.ox-field__hint {
   margin: 0;
-  padding: 7px 9px;
-  border: 1px solid #d8dee8;
-  border-radius: 8px;
-  background: #f6f8fb;
-  font-weight: 500;
-}
-
-.oxyai-builder-plan input[type="text"] {
-  width: 100%;
-  border: 1px solid #d8dee8;
-  border-radius: 8px;
-  padding: 8px 10px;
-  background: #fff;
-}
-
-.oxyai-builder-plan button {
-  justify-self: end;
-  border: 1px solid #155eef;
-  border-radius: 8px;
-  padding: 8px 10px;
-  background: #155eef;
-  color: #fff;
-  cursor: pointer;
-  font-weight: 700;
-}
-
-.oxyai-builder-variants section {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  align-items: center;
-  padding: 10px;
-  border: 1px solid #d8dee8;
-  border-radius: 8px;
-  background: #fff;
-}
-
-.oxyai-builder-variants section div {
-  display: grid;
-  gap: 3px;
-}
-
-.oxyai-builder-variants span {
-  color: #5b6678;
+  color: var(--ox-text-soft);
   font-size: 12px;
 }
 
-.oxyai-builder-variants button {
-  border: 1px solid #155eef;
-  border-radius: 8px;
-  padding: 8px 10px;
-  background: #155eef;
-  color: #fff;
+.ox-input,
+.ox-select,
+.ox-textarea {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--ox-border-strong);
+  border-radius: var(--ox-radius-sm);
+  background: var(--ox-surface) !important;
+  color: var(--ox-text) !important;
+  -webkit-text-fill-color: var(--ox-text);
+  caret-color: var(--ox-text);
+  font-family: var(--ox-font);
+  font-size: 13.5px;
+  line-height: 1.5;
+  transition: border-color 140ms var(--ox-ease), box-shadow 140ms var(--ox-ease);
+}
+
+.ox-input:focus,
+.ox-select:focus,
+.ox-textarea:focus {
+  border-color: var(--ox-brand);
+  box-shadow: 0 0 0 4px var(--ox-brand-ring);
+  outline: none;
+}
+
+.ox-textarea {
+  min-height: 92px;
+  resize: vertical;
+  font-family: var(--ox-font);
+}
+
+.ox-textarea--prompt {
+  min-height: 110px;
+  font-size: 13.5px;
+}
+
+.ox-textarea--code {
+  min-height: 180px;
+  font-family: var(--ox-mono) !important;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.ox-textarea::placeholder,
+.ox-input::placeholder {
+  color: var(--ox-text-muted);
+  -webkit-text-fill-color: var(--ox-text-muted);
+  opacity: 1;
+}
+
+.ox-select {
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='none' stroke='%2364748b' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' d='M1 1.5l5 5 5-5'/></svg>") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 12px center !important;
+  padding-right: 36px;
+}
+
+/* ===== BUTTONS ===== */
+
+.ox-btn {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 8px 14px;
+  border: 1px solid var(--ox-border-strong);
+  border-radius: var(--ox-radius-sm);
+  background: var(--ox-surface);
+  color: var(--ox-text);
+  font-family: var(--ox-font);
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
-  font-weight: 700;
+  text-decoration: none;
+  transition: border-color 140ms var(--ox-ease), background-color 140ms var(--ox-ease),
+    color 140ms var(--ox-ease), transform 80ms var(--ox-ease), box-shadow 140ms var(--ox-ease);
 }
 
-.oxyai-builder-chat {
+.ox-btn:hover {
+  border-color: var(--ox-text-soft);
+  background: var(--ox-surface-alt);
+}
+
+.ox-btn:active {
+  transform: translateY(1px);
+}
+
+.ox-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--ox-brand-ring);
+}
+
+.ox-btn--primary {
+  border-color: var(--ox-brand);
+  background: var(--ox-brand);
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.25);
+}
+
+.ox-btn--primary:hover {
+  background: var(--ox-brand-strong);
+  border-color: var(--ox-brand-strong);
+  color: #fff;
+}
+
+.ox-btn--success {
+  border-color: var(--ox-success);
+  background: var(--ox-success);
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(5, 150, 105, 0.25);
+}
+
+.ox-btn--success:hover {
+  background: #047857;
+  border-color: #047857;
+  color: #fff;
+}
+
+.ox-btn--ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ox-text-soft);
+}
+
+.ox-btn--ghost:hover {
+  background: var(--ox-surface-alt);
+  color: var(--ox-text);
+}
+
+.ox-btn--soft {
+  border-color: var(--ox-brand-soft);
+  background: var(--ox-brand-soft);
+  color: var(--ox-brand);
+}
+
+.ox-btn--soft:hover {
+  background: rgba(37, 99, 235, 0.14);
+  border-color: rgba(37, 99, 235, 0.18);
+  color: var(--ox-brand-strong);
+}
+
+.ox-btn--block {
+  width: 100%;
+}
+
+/* ===== CHIPS ===== */
+
+.ox-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ox-chip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 11px;
+  border: 1px solid var(--ox-border-strong);
+  border-radius: var(--ox-radius-pill);
+  background: var(--ox-surface);
+  color: var(--ox-text-soft);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 140ms var(--ox-ease), background-color 140ms var(--ox-ease),
+    color 140ms var(--ox-ease);
+}
+
+.ox-chip:has(input:checked) {
+  border-color: var(--ox-brand);
+  background: var(--ox-brand-soft);
+  color: var(--ox-brand-strong);
+}
+
+.ox-chip:focus-within {
+  border-color: var(--ox-brand);
+  box-shadow: 0 0 0 4px var(--ox-brand-ring);
+}
+
+.ox-chip input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* ===== SOURCE TABS ===== */
+
+.ox-source {
   display: grid;
-  gap: 12px;
-  margin-top: 14px;
-  padding: 14px;
-  border: 1px solid #d8dee8;
-  border-radius: 8px;
-  background: #f8fafc;
+  gap: 10px;
 }
 
-.oxyai-builder-chat[hidden] {
+.ox-source__tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--ox-radius-sm);
+  background: var(--ox-surface-alt);
+  width: fit-content;
+}
+
+.ox-source__tab {
+  border: 0;
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ox-text-soft);
+  font-family: var(--ox-mono);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background-color 140ms var(--ox-ease), color 140ms var(--ox-ease);
+}
+
+.ox-source__tab:hover {
+  color: var(--ox-text);
+}
+
+.ox-source__tab.is-active {
+  background: var(--ox-surface);
+  color: var(--ox-brand);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.ox-source__panel[hidden] {
   display: none;
 }
 
-.oxyai-builder-target {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: center;
-  padding: 12px;
-  border: 1px solid #d8dee8;
-  border-radius: 8px;
-  background: #fff;
+/* ===== DISCLOSURE ===== */
+
+.ox-disclosure {
+  border: 1px solid var(--ox-border);
+  border-radius: var(--ox-radius-sm);
+  background: var(--ox-surface-inset);
 }
 
-.oxyai-builder-target span {
+.ox-disclosure > summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 14px;
+  color: var(--ox-text-soft);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+
+.ox-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ox-disclosure > summary::before {
+  content: "›";
+  display: inline-block;
+  color: var(--ox-text-muted);
+  font-size: 14px;
+  font-weight: 700;
+  transition: transform 140ms var(--ox-ease);
+}
+
+.ox-disclosure[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.ox-disclosure[open] > summary {
+  border-bottom: 1px solid var(--ox-border);
+  color: var(--ox-text);
+}
+
+.ox-disclosure__body {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+/* ===== TARGET CARD (edit mode) ===== */
+
+.ox-target {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--ox-border);
+  border-radius: var(--ox-radius-sm);
+  background: var(--ox-surface-inset);
+}
+
+.ox-target__head {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.ox-target__eyebrow {
   display: block;
-  margin-bottom: 4px;
-  color: #155eef;
-  font-size: 11px;
+  margin: 0 0 2px;
+  color: var(--ox-brand);
+  font-size: 10.5px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.oxyai-builder-target-actions {
+.ox-target__summary {
+  margin: 0;
+  color: var(--ox-text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.ox-target__actions {
   display: flex;
+  gap: 6px;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
 }
 
-.oxyai-builder-target-actions select,
-.oxyai-builder-target-actions button,
-.oxyai-builder-chat-input button {
-  border: 1px solid #d8dee8;
-  border-radius: 8px;
-  padding: 8px 10px;
-  background: #fff;
-  cursor: pointer;
+.ox-target__actions .ox-select {
+  width: auto;
+  min-width: 0;
+  padding: 6px 30px 6px 10px;
+  font-size: 12px;
+  background-position: right 8px center !important;
 }
 
-.oxyai-builder-chat-log {
+.ox-target__actions .ox-btn {
+  min-height: 30px;
+  padding: 4px 11px;
+  font-size: 12px;
+}
+
+/* ===== CHAT ===== */
+
+.ox-chat {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   max-height: 220px;
-  overflow: auto;
-  padding: 12px;
-  border: 1px solid #d8dee8;
-  border-radius: 8px;
-  background: #fff;
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid var(--ox-border);
+  border-radius: var(--ox-radius-sm);
+  background: var(--ox-surface);
 }
 
-.oxyai-chat-empty {
-  color: #5b6678;
+.ox-chat__empty {
+  color: var(--ox-text-muted);
+  font-size: 12.5px;
+  text-align: center;
+  padding: 12px 0;
 }
 
-.oxyai-chat-message {
+.ox-chat__msg {
   max-width: 88%;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: #eef4ff;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
-.oxyai-chat-message p {
-  margin: 4px 0 0;
-}
-
-.oxyai-chat-message.is-user {
+.ox-chat__msg--user {
   justify-self: end;
-  background: #111827;
+  background: var(--ox-brand);
   color: #fff;
+  border-bottom-right-radius: 3px;
 }
 
-.oxyai-chat-message.is-assistant {
+.ox-chat__msg--assistant {
   justify-self: start;
-  background: #eef4ff;
+  background: var(--ox-surface-alt);
+  color: var(--ox-text);
+  border-bottom-left-radius: 3px;
 }
 
-.oxyai-chat-message.is-system {
-  max-width: 100%;
+.ox-chat__msg--system {
   justify-self: center;
-  background: #f3f4f6;
-  color: #5b6678;
+  max-width: 100%;
+  background: rgba(180, 83, 9, 0.08);
+  color: var(--ox-warning);
+  font-size: 12px;
+  text-align: center;
 }
 
-.oxyai-builder-chat-input {
+.ox-chat__role {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.7;
+}
+
+.ox-chat-input {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 8px;
   align-items: stretch;
 }
 
-.oxyai-builder-chat-input textarea {
-  min-height: 82px;
+.ox-chat-input textarea {
+  min-height: 70px;
 }
 
-.oxyai-builder-chat-input div {
+.ox-chat-input__actions {
   display: grid;
-  gap: 8px;
+  gap: 6px;
+  align-content: stretch;
 }
 
-.oxyai-builder-chat-input button[data-oxyai-chat-apply] {
-  border-color: #155eef;
-  background: #155eef;
-  color: #fff;
-}
-
-.oxyai-builder-dialog label {
-  display: grid;
-  gap: 7px;
-  margin-top: 14px;
-  font-weight: 700;
-  color: #111827 !important;
-}
-
-.oxyai-builder-dialog textarea {
-  width: 100%;
-  min-height: 90px;
-  padding: 12px 14px;
-  border: 1px solid #d8dee8;
-  border-radius: 8px;
-  background: #fff !important;
-  box-sizing: border-box;
-  color: #111827 !important;
-  caret-color: #111827;
-  -webkit-text-fill-color: #111827;
-  font-family: Consolas, "SFMono-Regular", Menlo, monospace;
-  font-size: 13px;
-  font-weight: 400;
-}
-
-.oxyai-builder-dialog input,
-.oxyai-builder-dialog select,
-.oxyai-builder-dialog button {
-  color: #111827;
-}
-
-.oxyai-builder-dialog textarea::placeholder {
-  color: #7b8493;
-  -webkit-text-fill-color: #7b8493;
-}
-
-.oxyai-builder-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 12px;
-}
-
-.oxyai-builder-grid .is-html {
-  grid-row: auto;
-}
-
-.oxyai-builder-grid .is-html textarea {
-  min-height: 230px;
-}
-
-.oxyai-builder-grid textarea {
-  min-height: 120px;
-}
-
-.oxyai-builder-options {
-  justify-content: flex-start;
-  flex-wrap: wrap;
-  margin-top: 14px;
-}
-
-.oxyai-builder-savebar {
-  display: grid;
-  gap: 8px;
-  margin-top: 14px;
-  padding: 12px;
-  border: 1px solid #d8dee8;
-  border-radius: 8px;
-  background: #f8fafc;
-}
-
-.oxyai-builder-savebar label {
-  display: grid;
-  gap: 7px;
-  margin: 0;
-}
-
-.oxyai-builder-savebar select {
-  width: 100%;
-  border: 1px solid #d8dee8;
-  border-radius: 8px;
-  padding: 8px 10px;
-  background: #fff;
-}
-
-.oxyai-builder-savebar p {
-  margin: 0;
-  color: #5b6678;
+.ox-chat-input__actions .ox-btn {
+  min-height: 32px;
+  padding: 4px 11px;
   font-size: 12px;
 }
 
-.oxyai-builder-option-notes {
+/* ===== PLAN / VARIANTS ===== */
+
+.ox-plan,
+.ox-variants {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.oxyai-builder-option-notes span {
-  padding: 9px 10px;
-  border: 1px dashed #d8dee8;
-  border-radius: 8px;
-  color: #5b6678;
-  font-size: 12px;
-}
-
-.oxyai-builder-options label {
-  display: inline-flex;
-  gap: 7px;
-  align-items: center;
-  margin: 0;
-  padding: 9px 11px;
-  border: 1px solid #d8dee8;
-  border-radius: 8px;
-  background: #f6f8fb;
-  font-weight: 500;
-}
-
-.oxyai-builder-status {
-  margin-top: 14px;
-  padding: 11px 13px;
-  border: 1px solid #d8dee8;
-  border-radius: 8px;
-  background: #f6f8fb;
-}
-
-.oxyai-codex-handoff {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: center;
-  margin-top: 14px;
+  gap: 10px;
   padding: 12px;
-  border: 1px solid rgba(21, 94, 239, 0.24);
-  border-radius: 8px;
-  background: #eef4ff;
+  border: 1px solid var(--ox-brand-soft);
+  border-radius: var(--ox-radius-sm);
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.03), transparent 60%);
 }
 
-.oxyai-codex-handoff[hidden] {
+.ox-plan[hidden],
+.ox-variants[hidden] {
   display: none;
 }
 
-.oxyai-codex-handoff p {
-  margin: 4px 0 0;
-  color: #5b6678;
-}
-
-.oxyai-codex-handoff > div:last-child {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.oxyai-codex-handoff button {
-  border: 1px solid #155eef;
-  border-radius: 8px;
-  padding: 8px 10px;
-  background: #fff;
-  color: #155eef;
-  cursor: pointer;
+.ox-plan__head strong {
+  display: block;
+  font-size: 13px;
   font-weight: 700;
 }
 
-.oxyai-codex-handoff button[data-oxyai-handoff-apply] {
-  background: #155eef;
-  color: #fff;
+.ox-plan__head p {
+  margin: 4px 0 0;
+  color: var(--ox-text-soft);
+  font-size: 12px;
 }
 
-.oxyai-builder-status.is-error {
-  color: #b91c1c;
-  background: #fff1f1;
-  border-color: #fecaca;
+.ox-plan__q {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid var(--ox-border);
+  border-radius: var(--ox-radius-sm);
+  background: var(--ox-surface);
 }
 
-.oxyai-builder-actions {
-  justify-content: flex-end;
-  margin-top: 14px;
+.ox-plan__q strong {
+  font-size: 12.5px;
+  font-weight: 700;
 }
 
-.oxyai-builder-actions button {
-  border: 1px solid #d8dee8;
-  border-radius: 8px;
-  padding: 9px 14px;
-  background: #fff;
+.ox-plan__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.ox-plan__choice {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 5px 9px;
+  border: 1px solid var(--ox-border-strong);
+  border-radius: var(--ox-radius-pill);
+  background: var(--ox-surface-alt);
+  color: var(--ox-text-soft);
+  font-size: 11.5px;
   cursor: pointer;
+  transition: border-color 140ms var(--ox-ease), background-color 140ms var(--ox-ease),
+    color 140ms var(--ox-ease);
 }
 
-.oxyai-builder-actions button[data-oxyai-convert] {
-  border-color: #155eef;
-  background: #155eef;
+.ox-plan__choice:has(input:checked) {
+  border-color: var(--ox-brand);
+  background: var(--ox-brand-soft);
+  color: var(--ox-brand-strong);
+}
+
+.ox-plan__choice:focus-within {
+  border-color: var(--ox-brand);
+  box-shadow: 0 0 0 4px var(--ox-brand-ring);
+}
+
+.ox-plan__choice input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.ox-variants__item {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px;
+  border: 1px solid var(--ox-border);
+  border-radius: var(--ox-radius-sm);
+  background: var(--ox-surface);
+}
+
+.ox-variants__item strong {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.ox-variants__item span {
+  display: block;
+  margin-top: 1px;
+  color: var(--ox-text-soft);
+  font-size: 11.5px;
+}
+
+/* ===== HANDOFF ===== */
+
+.ox-handoff {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: var(--ox-radius-sm);
+  background: var(--ox-brand-soft);
+}
+
+.ox-handoff[hidden] {
+  display: none;
+}
+
+.ox-handoff__head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.ox-handoff__icon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--ox-brand);
   color: #fff;
+  font-size: 13px;
 }
 
-.oxyai-builder-actions button[data-oxyai-edit] {
-  border-color: #111827;
-  background: #111827;
-  color: #fff;
+.ox-handoff strong {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
 }
 
-.oxyai-builder-actions button[data-oxyai-direct-apply],
-.oxyai-codex-handoff button[data-oxyai-handoff-save] {
-  border-color: #0f766e;
-  background: #0f766e;
-  color: #fff;
+.ox-handoff p {
+  margin: 0;
+  color: var(--ox-text-soft);
+  font-size: 11.5px;
+  line-height: 1.45;
 }
 
-@media (max-width: 760px) {
-  .oxyai-builder-grid,
-  .oxyai-builder-option-notes,
-  .oxyai-builder-chat-input,
-  .oxyai-builder-direction {
+.ox-handoff__actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ox-handoff__actions .ox-btn {
+  min-height: 32px;
+  padding: 5px 11px;
+  font-size: 12px;
+}
+
+/* ===== STATUS ===== */
+
+.ox-statusbar {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  align-self: flex-start;
+  padding: 6px 12px 6px 10px;
+  border-radius: var(--ox-radius-pill);
+  background: var(--ox-surface-alt);
+  color: var(--ox-text-soft);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ox-statusbar::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ox-text-muted);
+}
+
+.ox-statusbar.is-working {
+  background: var(--ox-brand-soft);
+  color: var(--ox-brand-strong);
+}
+
+.ox-statusbar.is-working::before {
+  background: var(--ox-brand);
+  animation: ox-pulse 1.2s var(--ox-ease) infinite;
+}
+
+.ox-statusbar.is-success {
+  background: var(--ox-success-soft);
+  color: var(--ox-success);
+}
+
+.ox-statusbar.is-success::before {
+  background: var(--ox-success);
+}
+
+.ox-statusbar.is-error {
+  background: var(--ox-danger-soft);
+  color: var(--ox-danger);
+}
+
+.ox-statusbar.is-error::before {
+  background: var(--ox-danger);
+}
+
+@keyframes ox-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.6); opacity: 0.5; }
+}
+
+/* ===== FOOTER ===== */
+
+.ox-panel__footer {
+  display: grid;
+  gap: 8px;
+  padding: 14px 20px 16px;
+  border-top: 1px solid var(--ox-border);
+  background: var(--ox-surface-inset);
+  flex-shrink: 0;
+}
+
+.ox-footer-row[hidden] {
+  display: none;
+}
+
+.ox-footer-secondary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.ox-footer-secondary .ox-select {
+  padding: 6px 30px 6px 10px;
+  font-size: 12px;
+  background-position: right 8px center !important;
+}
+
+.ox-footer-secondary__buttons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ox-footer-secondary__buttons .ox-btn {
+  min-height: 30px;
+  padding: 4px 11px;
+  font-size: 12px;
+}
+
+/* ===== HELP TEXT ===== */
+
+.ox-help {
+  margin: -2px 0 0;
+  color: var(--ox-text-soft);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.ox-help strong {
+  color: var(--ox-text);
+  font-weight: 700;
+}
+
+/* ===== RESPONSIVE ===== */
+
+@media (max-width: 600px) {
+  .ox-panel {
+    width: 100vw;
+  }
+
+  .ox-modes {
+    padding: 10px 16px;
+  }
+
+  .ox-panel__body {
+    padding: 16px;
+  }
+
+  .ox-chat-input {
     grid-template-columns: 1fr;
   }
 
-  .oxyai-builder-target {
-    align-items: stretch;
-    flex-direction: column;
+  .ox-chat-input__actions {
+    grid-template-columns: 1fr 1fr;
+    grid-auto-flow: column;
   }
 
-  .oxyai-codex-handoff {
-    align-items: stretch;
+  .ox-target__head {
     flex-direction: column;
-  }
-
-  .oxyai-builder-grid .is-html {
-    grid-row: auto;
+    align-items: stretch;
   }
 }

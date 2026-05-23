@@ -69,8 +69,11 @@ final class AssetLoader
         $breakdance = isset($_GET['breakdance']) ? sanitize_text_field(wp_unslash((string) $_GET['breakdance'])) : '';
         $ctBuilder = isset($_GET['ct_builder']) ? sanitize_text_field(wp_unslash((string) $_GET['ct_builder'])) : '';
 
-        return $page === 'oxyai-oxygen'
-            || str_contains($page, 'oxygen')
+        if ($page === 'oxyai-oxygen') {
+            return false;
+        }
+
+        return str_contains($page, 'oxygen')
             || str_contains($page, 'ct_')
             || $oxygen === 'builder'
             || $breakdance === 'builder'
