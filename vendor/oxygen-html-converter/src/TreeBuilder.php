@@ -139,6 +139,8 @@ class TreeBuilder
         // Manual override takes precedence; otherwise resolve from environment setting.
         $preferEssentialElements = $this->preferEssentialElements ?? $this->environment->shouldPreferEssentialElements();
         $this->mapper->setPreferEssentialElements($preferEssentialElements);
+        $essentialContracts = $this->environment->getEssentialElementContractStatuses();
+        $this->mapper->setEssentialElementCompatibility($essentialContracts);
 
         // Report compatibility decisions when mapping mode is environment-driven.
         if ($this->preferEssentialElements === null) {
@@ -584,6 +586,9 @@ class TreeBuilder
                 $element['data']['properties']['content']['content']['video_file_url'],
                 ['http', 'https', 'data']
             );
+        }
+        if (($element['data']['type'] ?? '') === ElementTypes::ESSENTIAL_BASIC_LIST) {
+            $this->sanitizeEssentialBasicListUrls($element);
         }
 
         // Apply fixed header spacing heuristic (optional)
@@ -1416,6 +1421,27 @@ class TreeBuilder
         // mailto/tel: strip CRLF to prevent header injection.
         $safeUrl = preg_replace('/[\r\n]+/', '', $url);
         return is_string($safeUrl) ? $safeUrl : '#';
+    }
+
+    /**
+     * @param array<string, mixed> $element
+     */
+    private function sanitizeEssentialBasicListUrls(array &$element): void
+    {
+        if (!isset($element['data']['properties']['content']['content']['items'])
+            || !is_array($element['data']['properties']['content']['content']['items'])
+        ) {
+            return;
+        }
+
+        foreach ($element['data']['properties']['content']['content']['items'] as &$item) {
+            if (!is_array($item) || !isset($item['link']['url']) || !is_string($item['link']['url'])) {
+                continue;
+            }
+
+            $item['link']['url'] = $this->sanitizeUrl($item['link']['url'], ['http', 'https', 'mailto', 'tel']);
+        }
+        unset($item);
     }
 
     /**

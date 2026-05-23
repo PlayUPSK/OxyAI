@@ -15,6 +15,10 @@ class ElementMapper
 {
     private GridDetector $gridDetector;
     private bool $preferEssentialElements = false;
+    /**
+     * @var array<string, array{compatible?:bool}>
+     */
+    private array $essentialElementCompatibility = [];
 
     public function __construct()
     {
@@ -27,6 +31,14 @@ class ElementMapper
     public function setPreferEssentialElements(bool $prefer): void
     {
         $this->preferEssentialElements = $prefer;
+    }
+
+    /**
+     * @param array<string, array{compatible?:bool}> $compatibility
+     */
+    public function setEssentialElementCompatibility(array $compatibility): void
+    {
+        $this->essentialElementCompatibility = $compatibility;
     }
 
     /**
@@ -873,6 +885,10 @@ class ElementMapper
             return false;
         }
 
+        if (!$this->isEssentialCompatible('button')) {
+            return false;
+        }
+
         if ($this->hasElementChildren($node)) {
             return false;
         }
@@ -882,25 +898,35 @@ class ElementMapper
 
     private function getEssentialElementType(string $tag, DOMElement $node): ?string
     {
-        if (in_array($tag, ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'], true) && $this->hasOnlyTextContent($node)) {
+        if ($this->isEssentialCompatible('heading')
+            && in_array($tag, ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'], true)
+            && $this->hasOnlyTextContent($node)
+        ) {
             return ElementTypes::ESSENTIAL_HEADING;
         }
 
         if ($tag === 'a' && $this->hasOnlyTextContent($node)) {
-            return $this->isButtonLikeLink($node)
-                ? ElementTypes::ESSENTIAL_BUTTON
-                : ElementTypes::ESSENTIAL_TEXT_LINK;
+            if ($this->isButtonLikeLink($node) && $this->isEssentialCompatible('button')) {
+                return ElementTypes::ESSENTIAL_BUTTON;
+            }
+
+            return $this->isEssentialCompatible('textLink') ? ElementTypes::ESSENTIAL_TEXT_LINK : null;
         }
 
-        if ($tag === 'img' && trim($node->getAttribute('src')) !== '') {
+        if ($this->isEssentialCompatible('image') && $tag === 'img' && trim($node->getAttribute('src')) !== '') {
             return ElementTypes::ESSENTIAL_IMAGE;
         }
 
-        if (in_array($tag, ['ul', 'ol'], true) && $this->isSimpleList($node)) {
+        if ($this->isEssentialCompatible('basicList') && in_array($tag, ['ul', 'ol'], true) && $this->isSimpleList($node)) {
             return ElementTypes::ESSENTIAL_BASIC_LIST;
         }
 
         return null;
+    }
+
+    private function isEssentialCompatible(string $key): bool
+    {
+        return (bool) ($this->essentialElementCompatibility[$key]['compatible'] ?? false);
     }
 
     private function isSimpleList(DOMElement $node): bool

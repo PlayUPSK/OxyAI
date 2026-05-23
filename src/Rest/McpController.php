@@ -513,6 +513,7 @@ final class McpController
     private function applyHtmlToPage(array $input)
     {
         $postId = (int) ($input['postId'] ?? $input['id'] ?? 0);
+        $input['registerSelectors'] = $input['registerSelectors'] ?? true;
         $converted = $this->converter->convert(
             SourceBundle::fromArray($input),
             is_array($input['options'] ?? null) ? $input['options'] : []
@@ -544,6 +545,7 @@ final class McpController
     private function applyOxygenJsonToPage(array $input)
     {
         $postId = (int) ($input['postId'] ?? $input['id'] ?? 0);
+        $input['registerSelectors'] = $input['registerSelectors'] ?? true;
         $oxygen = is_array($input['oxygen'] ?? null) ? $input['oxygen'] : $input;
 
         return $this->pageMutations->applyOxygen($postId, $oxygen, $input);

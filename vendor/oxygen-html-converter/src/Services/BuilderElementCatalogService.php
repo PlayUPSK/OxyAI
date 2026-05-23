@@ -95,7 +95,9 @@ class BuilderElementCatalogService
             return call_user_func([$className, $method]);
         } catch (\Throwable $exception) {
             return [
-                'error' => $exception->getMessage(),
+                'error' => 'static_call_failed',
+                'class' => '\\' . ltrim($className, '\\'),
+                'method' => $method,
             ];
         }
     }

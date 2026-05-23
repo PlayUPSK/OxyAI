@@ -113,8 +113,8 @@ final class SelectorRegistrationService
             }
         }
 
-        $this->setGlobalOption(self::SELECTORS_OPTION, $allSelectors);
-        $this->setGlobalOption(self::COLLECTIONS_OPTION, array_values($collections));
+        $this->setGlobalOption(self::SELECTORS_OPTION, $allSelectors, true);
+        $this->setGlobalOption(self::COLLECTIONS_OPTION, array_values($collections), true);
 
         if (is_callable('\\Breakdance\\Render\\generateCacheForGlobalSettings')) {
             call_user_func('\\Breakdance\\Render\\generateCacheForGlobalSettings');
@@ -314,11 +314,19 @@ final class SelectorRegistrationService
     /**
      * @param mixed $value
      */
-    private function setGlobalOption(string $key, $value): void
+    private function setGlobalOption(string $key, $value, bool $jsonEncodeRawOptionFallback = false): void
     {
         if (is_callable('\\Breakdance\\Data\\set_global_option')) {
             call_user_func('\\Breakdance\\Data\\set_global_option', $key, $value);
             return;
+        }
+
+        if ($jsonEncodeRawOptionFallback) {
+            $encoded = wp_json_encode($value);
+            if (is_string($encoded)) {
+                update_option($key, $encoded, false);
+                return;
+            }
         }
 
         update_option($key, $value, false);

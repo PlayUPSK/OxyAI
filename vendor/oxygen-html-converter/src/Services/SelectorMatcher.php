@@ -195,6 +195,13 @@ class SelectorMatcher
         }
 
         $type = $element['data']['type'] ?? '';
+        if ($type === 'EssentialElements\\Heading') {
+            $headingTag = $element['data']['properties']['content']['content']['tags'] ?? null;
+            if (is_string($headingTag) && in_array(strtolower($headingTag), ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'], true)) {
+                return strtolower($headingTag);
+            }
+        }
+
         $mapping = [
             'OxygenElements\\Container' => 'div',
             'OxygenElements\\ContainerLink' => 'a',

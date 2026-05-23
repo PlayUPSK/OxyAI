@@ -29,10 +29,10 @@ class BuilderContractService
     {
         $contracts = [
             'button' => ['\\EssentialElements\\Button', ['content.content.text', 'content.content.link.url']],
-            'heading' => ['\\EssentialElements\\Heading', []],
-            'text' => ['\\EssentialElements\\Text', []],
-            'textLink' => ['\\EssentialElements\\TextLink', []],
-            'image' => ['\\EssentialElements\\Image2', []],
+            'heading' => ['\\EssentialElements\\Heading', ['content.content.text']],
+            'text' => ['\\EssentialElements\\Text', ['content.content.text']],
+            'textLink' => ['\\EssentialElements\\TextLink', ['content.content.text', 'content.content.link.url']],
+            'image' => ['\\EssentialElements\\Image2', ['content.image.from', 'content.image.url']],
             'basicList' => ['\\EssentialElements\\BasicList', ['content.content.items[].text']],
             'columns' => ['\\EssentialElements\\Columns', []],
             'column' => ['\\EssentialElements\\Column', []],
@@ -71,6 +71,8 @@ class BuilderContractService
         $issues = [];
         $details = [
             'dynamicPaths' => [],
+            'defaultPropertiesPaths' => [],
+            'requiredContentPaths' => array_values($requiredDynamicPaths),
             'availableIn' => null,
         ];
 
@@ -91,6 +93,15 @@ class BuilderContractService
         }
 
         if (!empty($requiredDynamicPaths)) {
+            $defaultProperties = [];
+            if (method_exists($normalizedClass, 'defaultProperties')) {
+                $defaultPropertiesResult = $this->callStatic($normalizedClass, 'defaultProperties');
+                if ($defaultPropertiesResult['ok'] && is_array($defaultPropertiesResult['value'])) {
+                    $defaultProperties = $defaultPropertiesResult['value'];
+                    $details['defaultPropertiesPaths'] = $this->flattenPropertyPaths($defaultProperties);
+                }
+            }
+
             if (!method_exists($normalizedClass, 'dynamicPropertyPaths')) {
                 $issues[] = sprintf('Class %s is missing dynamicPropertyPaths().', $normalizedClass);
             } else {
@@ -99,9 +110,9 @@ class BuilderContractService
                     $dynamicPaths = $this->extractDynamicPaths($dynamicPathsResult['value']);
                     $details['dynamicPaths'] = $dynamicPaths;
                     foreach ($requiredDynamicPaths as $requiredPath) {
-                        if (!in_array($requiredPath, $dynamicPaths, true)) {
+                        if (!$this->contractPathSatisfied($requiredPath, $dynamicPaths, $defaultProperties)) {
                             $issues[] = sprintf(
-                                'Class %s is missing dynamic path "%s".',
+                                'Class %s is missing content contract path "%s".',
                                 $normalizedClass,
                                 $requiredPath
                             );
@@ -168,6 +179,71 @@ class BuilderContractService
             $path = $item['path'] ?? null;
             if (is_string($path) && $path !== '') {
                 $paths[] = $path;
+            }
+        }
+
+        return array_values(array_unique($paths));
+    }
+
+    /**
+     * @param array<int, string> $dynamicPaths
+     * @param array<string, mixed> $defaultProperties
+     */
+    private function contractPathSatisfied(string $requiredPath, array $dynamicPaths, array $defaultProperties): bool
+    {
+        if (in_array($requiredPath, $dynamicPaths, true)) {
+            return true;
+        }
+
+        $wildcardlessPath = str_replace('[]', '', $requiredPath);
+        if (in_array($wildcardlessPath, $dynamicPaths, true)) {
+            return true;
+        }
+
+        if ($this->hasPath($defaultProperties, $wildcardlessPath)) {
+            return true;
+        }
+
+        $segments = explode('.', $wildcardlessPath);
+        while (count($segments) > 1) {
+            array_pop($segments);
+            if ($this->hasPath($defaultProperties, implode('.', $segments))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param array<string, mixed> $properties
+     */
+    private function hasPath(array $properties, string $path): bool
+    {
+        $current = $properties;
+        foreach (explode('.', $path) as $segment) {
+            if (!is_array($current) || !array_key_exists($segment, $current)) {
+                return false;
+            }
+
+            $current = $current[$segment];
+        }
+
+        return true;
+    }
+
+    /**
+     * @param array<string, mixed> $properties
+     * @return array<int, string>
+     */
+    private function flattenPropertyPaths(array $properties, string $prefix = ''): array
+    {
+        $paths = [];
+        foreach ($properties as $key => $value) {
+            $path = $prefix === '' ? (string) $key : $prefix . '.' . (string) $key;
+            $paths[] = $path;
+            if (is_array($value)) {
+                array_push($paths, ...$this->flattenPropertyPaths($value, $path));
             }
         }
 
