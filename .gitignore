@@ -6,11 +6,6 @@ deep-research-report.md
 .tmp-mcp/
 page.html
 
-# Local-only artifacts (Codex worktrees, fetched live-site assets, ad-hoc tooling)
-.review/
-post93.css
-/security/
-
 # OS junk
 .DS_Store
 Thumbs.db

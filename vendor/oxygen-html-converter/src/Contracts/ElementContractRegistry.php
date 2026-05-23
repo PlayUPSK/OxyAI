@@ -31,23 +31,6 @@ final class ElementContractRegistry
                 'content.content.text',
                 'content.content.link.url',
             ],
-            ElementTypes::ESSENTIAL_HEADING => [
-                'content.content.text',
-            ],
-            ElementTypes::ESSENTIAL_TEXT => [
-                'content.content.text',
-            ],
-            ElementTypes::ESSENTIAL_TEXT_LINK => [
-                'content.content.text',
-                'content.content.link.url',
-            ],
-            ElementTypes::ESSENTIAL_IMAGE => [
-                'content.image.from',
-                'content.image.url',
-            ],
-            ElementTypes::ESSENTIAL_BASIC_LIST => [
-                'content.content.items',
-            ],
         ];
     }
 
@@ -60,3 +43,4 @@ final class ElementContractRegistry
         return $contracts[$elementType] ?? [];
     }
 }
+

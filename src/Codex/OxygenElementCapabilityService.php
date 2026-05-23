@@ -15,8 +15,6 @@ final class OxygenElementCapabilityService
     public function all(?string $elementType = null): array
     {
         $environment = new EnvironmentService();
-        $essentialContracts = $environment->getEssentialElementContractStatuses();
-        $builderElementCatalog = $environment->getBuilderElementCatalog();
         $elements = $this->elements();
 
         if ($elementType !== null && $elementType !== '') {
@@ -32,26 +30,15 @@ final class OxygenElementCapabilityService
                 'preferredButtonMapping' => $environment->shouldPreferEssentialElements()
                     ? ElementTypes::ESSENTIAL_BUTTON
                     : ElementTypes::CONTAINER,
-                'contractStatuses' => $essentialContracts,
-                'runtimeCatalog' => $builderElementCatalog,
-                'autoMappedWhenPreferred' => [
-                    ElementTypes::ESSENTIAL_BUTTON => 'button tags and button-like links with text-only content',
-                    ElementTypes::ESSENTIAL_HEADING => 'h1-h6 tags with text-only or inline-formatted content',
-                    ElementTypes::ESSENTIAL_TEXT_LINK => 'plain text links that are not button-like',
-                    ElementTypes::ESSENTIAL_IMAGE => 'img tags with a usable src attribute',
-                    ElementTypes::ESSENTIAL_BASIC_LIST => 'ul/ol lists whose li children contain only text or a single plain link',
-                ],
                 'notes' => [
-                    'When Breakdance Elements for Oxygen is active and compatible, safe static HTML can map to supported EssentialElements.',
-                    'Complex widgets such as tabs, accordions, menus, forms, and WooCommerce elements require dedicated content contracts and are reported as available only after explicit support is added.',
+                    'When Breakdance Elements for Oxygen is active and compatible, button-like HTML can map to EssentialElements\\Button.',
+                    'EssentialElements\\Button uses a different element namespace and may use button-specific design buckets.',
                 ],
             ],
             'nativeDesignPolicy' => [
                 'Use native design properties only for supported element/property pairs listed here.',
                 'Every native style value must be written under breakpoint_base unless a real responsive mapping is implemented.',
                 'Length values must use Oxygen structured values: {number, unit, style}.',
-                'For plain Oxygen Container/Text/Image elements, native design properties improve builder editability but class CssCode remains the reliable frontend render fallback in Oxygen 6 / Breakdance Oxygen.',
-                'Only strip class CSS for element types explicitly marked cssFallbackCanBeStripped=true.',
                 'Keep class CSS in CssCode for pseudo selectors, media queries, keyframes, complex selectors, responsive variants, and any unverified property.',
                 'Do not strip CssCode fallback unless conversion audit proves every declaration in the selector was consumed natively.',
             ],
@@ -209,93 +196,8 @@ final class OxygenElementCapabilityService
                 'Breakdance Elements for Oxygen button. Use only when the plugin and contract are available.',
                 ['button', 'size', 'typography', 'layout', 'position', 'effects', 'overflow'],
                 array_merge($sharedBoxStyles, $typographyStyles, $sizeStyles, $layoutStyles, $positionStyles, $effectStyles, $overflowStyles),
-                [
-                    'requiresBreakdanceElementsForOxygen' => true,
-                    'autoMapping' => 'button tags and button-like text links',
-                    'requiredContentPaths' => ['content.content.text', 'content.content.link.url'],
-                ],
+                ['requiresBreakdanceElementsForOxygen' => true],
                 'button'
-            ),
-            ElementTypes::ESSENTIAL_HEADING => $this->element(
-                ElementTypes::ESSENTIAL_HEADING,
-                'Breakdance Elements for Oxygen heading. Auto-mapped for h1-h6 with simple text/inline content.',
-                ['typography', 'size', 'spacing'],
-                array_merge($typographyStyles, $sizeStyles, ['margin-top', 'margin-bottom']),
-                [
-                    'requiresBreakdanceElementsForOxygen' => true,
-                    'autoMapping' => 'h1-h6 tags with text-only or inline-formatted content',
-                    'requiredContentPaths' => ['content.content.text'],
-                    'cssFallbackCanBeStripped' => false,
-                ]
-            ),
-            ElementTypes::ESSENTIAL_TEXT => $this->element(
-                ElementTypes::ESSENTIAL_TEXT,
-                'Breakdance Elements for Oxygen text. Supported as a hand-authored target; not auto-mapped from p/span yet because tag semantics need more verification.',
-                ['typography', 'size', 'spacing'],
-                array_merge($typographyStyles, $sizeStyles, ['margin-top', 'margin-bottom']),
-                [
-                    'requiresBreakdanceElementsForOxygen' => true,
-                    'autoMapping' => false,
-                    'requiredContentPaths' => ['content.content.text'],
-                    'cssFallbackCanBeStripped' => false,
-                ]
-            ),
-            ElementTypes::ESSENTIAL_TEXT_LINK => $this->element(
-                ElementTypes::ESSENTIAL_TEXT_LINK,
-                'Breakdance Elements for Oxygen text link. Auto-mapped for simple non-button links.',
-                ['typography', 'spacing'],
-                array_merge($typographyStyles, ['margin-top', 'margin-bottom']),
-                [
-                    'requiresBreakdanceElementsForOxygen' => true,
-                    'autoMapping' => 'a tags with text-only content that do not look like buttons',
-                    'requiredContentPaths' => ['content.content.text', 'content.content.link.url'],
-                    'cssFallbackCanBeStripped' => false,
-                ]
-            ),
-            ElementTypes::ESSENTIAL_IMAGE => $this->element(
-                ElementTypes::ESSENTIAL_IMAGE,
-                'Breakdance Elements for Oxygen image. Auto-mapped for img tags with a usable src.',
-                ['image', 'effects', 'borders', 'spacing'],
-                array_merge($sharedBoxStyles, $sizeStyles, $effectStyles),
-                [
-                    'requiresBreakdanceElementsForOxygen' => true,
-                    'autoMapping' => 'img tags with src',
-                    'requiredContentPaths' => ['content.image.from', 'content.image.url'],
-                    'cssFallbackCanBeStripped' => false,
-                ]
-            ),
-            ElementTypes::ESSENTIAL_BASIC_LIST => $this->element(
-                ElementTypes::ESSENTIAL_BASIC_LIST,
-                'Breakdance Elements for Oxygen basic list. Auto-mapped for simple text/link ul/ol lists.',
-                ['list', 'typography', 'spacing', 'size'],
-                array_merge($typographyStyles, $sizeStyles, ['margin-top', 'margin-bottom']),
-                [
-                    'requiresBreakdanceElementsForOxygen' => true,
-                    'autoMapping' => 'ul/ol where every li is plain text or a single text link',
-                    'requiredContentPaths' => ['content.content.items'],
-                    'cssFallbackCanBeStripped' => false,
-                ]
-            ),
-            ElementTypes::ESSENTIAL_COLUMNS => $this->element(
-                ElementTypes::ESSENTIAL_COLUMNS,
-                'Breakdance Elements for Oxygen columns. Contract is exposed for agents, but auto-mapping is not enabled until column detection/rebalancing is implemented.',
-                ['layout', 'size', 'spacing'],
-                array_merge($layoutStyles, $sizeStyles, ['gap', 'column-gap', 'padding']),
-                ['requiresBreakdanceElementsForOxygen' => true, 'autoMapping' => false, 'cssFallbackCanBeStripped' => false]
-            ),
-            ElementTypes::ESSENTIAL_COLUMN => $this->element(
-                ElementTypes::ESSENTIAL_COLUMN,
-                'Breakdance Elements for Oxygen column. Contract is exposed for agents, but auto-mapping is not enabled until paired Columns output is implemented.',
-                ['layout', 'layout_v2', 'background', 'size', 'order', 'text_colors'],
-                array_merge($sharedBoxStyles, $layoutStyles, $sizeStyles),
-                ['requiresBreakdanceElementsForOxygen' => true, 'autoMapping' => false, 'cssFallbackCanBeStripped' => false]
-            ),
-            ElementTypes::ESSENTIAL_ICON => $this->element(
-                ElementTypes::ESSENTIAL_ICON,
-                'Breakdance Elements for Oxygen icon. Contract is exposed for agents, but auto-mapping is not enabled until icon-library normalization is implemented.',
-                ['icon', 'spacing'],
-                ['color', 'font-size', 'width', 'height', 'margin-top', 'margin-bottom'],
-                ['requiresBreakdanceElementsForOxygen' => true, 'autoMapping' => false, 'cssFallbackCanBeStripped' => false]
             ),
         ];
     }
@@ -319,7 +221,6 @@ final class OxygenElementCapabilityService
             'description' => $description,
             'nativeDesignBuckets' => $designBuckets,
             'nativeCssProperties' => array_values(array_unique($nativeCssProperties)),
-            'cssFallbackCanBeStripped' => $boxCategory === 'button',
             'nativeValueShapes' => [
                 'breakpoint' => 'breakpoint_base',
                 'length' => ['number' => 'int|float', 'unit' => 'px|%|rem|em|vh|vw|...', 'style' => 'original CSS length'],

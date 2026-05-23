@@ -77,7 +77,6 @@ class TreeBuilder
     private bool $fixedHeaderDetected = false;
     private array $jsPatterns = [];
     private array $consumedCssSelectors = [];
-    private array $retainedCssSelectors = [];
 
     public function __construct()
     {
@@ -132,15 +131,12 @@ class TreeBuilder
         $this->fixedHeaderDetected = false;
         $this->jsPatterns = [];
         $this->consumedCssSelectors = [];
-        $this->retainedCssSelectors = [];
         $this->report->reset();
 
         // Configure element mapping mode per conversion.
         // Manual override takes precedence; otherwise resolve from environment setting.
         $preferEssentialElements = $this->preferEssentialElements ?? $this->environment->shouldPreferEssentialElements();
         $this->mapper->setPreferEssentialElements($preferEssentialElements);
-        $essentialContracts = $this->environment->getEssentialElementContractStatuses();
-        $this->mapper->setEssentialElementCompatibility($essentialContracts);
 
         // Report compatibility decisions when mapping mode is environment-driven.
         if ($this->preferEssentialElements === null) {
@@ -281,7 +277,6 @@ class TreeBuilder
             'detectedIconLibraries' => $this->detectedIconLibraries,
             'extractedCss' => $this->extractedCss,
             'redistributedCssSelectors' => array_keys($this->consumedCssSelectors),
-            'retainedCssSelectors' => array_keys($this->retainedCssSelectors),
             'preserveStyleBlockCss' => $this->preserveStyleBlockCss,
             'customClasses' => array_unique($this->customClasses),
             'stats' => $this->report->toArray(),
@@ -575,7 +570,7 @@ class TreeBuilder
                 ['http', 'https', 'mailto', 'tel']
             );
         }
-        if (($tag === 'a' || $tag === 'button') && isset($element['data']['properties']['content']['content']['link']['url'])) {
+        if ($tag === 'button' && isset($element['data']['properties']['content']['content']['link']['url'])) {
             $element['data']['properties']['content']['content']['link']['url'] = $this->sanitizeUrl(
                 $element['data']['properties']['content']['content']['link']['url'],
                 ['http', 'https', 'mailto', 'tel']
@@ -586,9 +581,6 @@ class TreeBuilder
                 $element['data']['properties']['content']['content']['video_file_url'],
                 ['http', 'https', 'data']
             );
-        }
-        if (($element['data']['type'] ?? '') === ElementTypes::ESSENTIAL_BASIC_LIST) {
-            $this->sanitizeEssentialBasicListUrls($element);
         }
 
         // Apply fixed header spacing heuristic (optional)
@@ -840,13 +832,8 @@ class TreeBuilder
                 ['design' => $rule['convertedStyles']]
             );
 
-            if ($this->styleExtractor->supportsDeclarationsFully($rule['declarations'], $elementType)
-                && $this->styleExtractor->canStripCssFallbackForElementType($elementType)
-            ) {
+            if ($this->styleExtractor->supportsDeclarationsFully($rule['declarations'], $elementType)) {
                 $this->consumedCssSelectors[$rule['selector']] = true;
-            } elseif ($this->styleExtractor->supportsDeclarationsFully($rule['declarations'], $elementType)) {
-                $this->retainedCssSelectors[$rule['selector']] = true;
-                unset($this->consumedCssSelectors[$rule['selector']]);
             }
 
             foreach ($rule['convertedStyles'] as $property => $value) {
@@ -991,98 +978,13 @@ class TreeBuilder
         }
 
         foreach (array_keys($this->consumedCssSelectors) as $selector) {
-            if (isset($this->retainedCssSelectors[$selector])) {
-                continue;
-            }
-
-            $css = $this->removeTopLevelCssRule($css, $selector);
+            $escaped = preg_quote($selector, '/');
+            // Match the selector followed by its rule block { ... }
+            $pattern = '/' . $escaped . '\s*\{[^}]*\}\s*/';
+            $css = preg_replace($pattern, '', $css);
         }
 
         return $css;
-    }
-
-    private function removeTopLevelCssRule(string $css, string $selector): string
-    {
-        $output = '';
-        $length = strlen($css);
-        $position = 0;
-        $depth = 0;
-
-        while ($position < $length) {
-            $open = strpos($css, '{', $position);
-            if ($open === false) {
-                $output .= substr($css, $position);
-                break;
-            }
-
-            $prefix = substr($css, $position, $open - $position);
-            $trimmedSelector = trim($prefix);
-
-            if ($depth === 0 && $trimmedSelector === $selector) {
-                $close = $this->findMatchingCssBrace($css, $open);
-                if ($close === null) {
-                    $output .= substr($css, $position);
-                    break;
-                }
-
-                $position = $close + 1;
-                while ($position < $length && ctype_space($css[$position])) {
-                    $position++;
-                }
-                continue;
-            }
-
-            $output .= $prefix . '{';
-            $depth++;
-            $position = $open + 1;
-
-            while ($position < $length && $depth > 0) {
-                $nextOpen = strpos($css, '{', $position);
-                $nextClose = strpos($css, '}', $position);
-
-                if ($nextClose === false) {
-                    $output .= substr($css, $position);
-                    return $output;
-                }
-
-                if ($nextOpen !== false && $nextOpen < $nextClose) {
-                    $output .= substr($css, $position, $nextOpen - $position + 1);
-                    $depth++;
-                    $position = $nextOpen + 1;
-                    continue;
-                }
-
-                $output .= substr($css, $position, $nextClose - $position + 1);
-                $depth--;
-                $position = $nextClose + 1;
-            }
-        }
-
-        return $output;
-    }
-
-    private function findMatchingCssBrace(string $css, int $openPosition): ?int
-    {
-        $depth = 0;
-        $length = strlen($css);
-
-        for ($i = $openPosition; $i < $length; $i++) {
-            if ($css[$i] === '{') {
-                $depth++;
-                continue;
-            }
-
-            if ($css[$i] !== '}') {
-                continue;
-            }
-
-            $depth--;
-            if ($depth === 0) {
-                return $i;
-            }
-        }
-
-        return null;
     }
 
     /**
@@ -1421,27 +1323,6 @@ class TreeBuilder
         // mailto/tel: strip CRLF to prevent header injection.
         $safeUrl = preg_replace('/[\r\n]+/', '', $url);
         return is_string($safeUrl) ? $safeUrl : '#';
-    }
-
-    /**
-     * @param array<string, mixed> $element
-     */
-    private function sanitizeEssentialBasicListUrls(array &$element): void
-    {
-        if (!isset($element['data']['properties']['content']['content']['items'])
-            || !is_array($element['data']['properties']['content']['content']['items'])
-        ) {
-            return;
-        }
-
-        foreach ($element['data']['properties']['content']['content']['items'] as &$item) {
-            if (!is_array($item) || !isset($item['link']['url']) || !is_string($item['link']['url'])) {
-                continue;
-            }
-
-            $item['link']['url'] = $this->sanitizeUrl($item['link']['url'], ['http', 'https', 'mailto', 'tel']);
-        }
-        unset($item);
     }
 
     /**

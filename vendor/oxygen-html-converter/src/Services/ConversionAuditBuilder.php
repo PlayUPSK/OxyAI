@@ -71,9 +71,6 @@ class ConversionAuditBuilder
                 'redistributedCssSelectors' => is_array($result['redistributedCssSelectors'] ?? null)
                     ? array_values($result['redistributedCssSelectors'])
                     : [],
-                'retainedCssSelectors' => is_array($result['retainedCssSelectors'] ?? null)
-                    ? array_values($result['retainedCssSelectors'])
-                    : [],
                 'info' => $info,
             ],
             'stripped' => $stripped,
