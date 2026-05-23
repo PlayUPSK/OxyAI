@@ -325,7 +325,7 @@ final class OxygenElementCapabilityService
                 'length' => ['number' => 'int|float', 'unit' => 'px|%|rem|em|vh|vw|...', 'style' => 'original CSS length'],
                 'color' => 'string',
                 'radius' => $boxCategory . '.borders.radius.breakpoint_base.{all,topLeft,topRight,bottomLeft,bottomRight,editMode}',
-                'spacing' => $boxCategory . '.padding|margin.breakpoint_base.{top,right,bottom,left}',
+                'spacing' => $boxCategory . '.padding|margin.breakpoint_base.{all,top,right,bottom,left,editMode}',
                 'layout' => 'layout.{property}.breakpoint_base',
                 'position' => 'position.{property}.breakpoint_base',
                 'effects' => 'effects.{property}.breakpoint_base',
