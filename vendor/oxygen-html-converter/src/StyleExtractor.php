@@ -194,6 +194,17 @@ class StyleExtractor
         return $supportedDeclarationCount > 0;
     }
 
+    /**
+     * Whether converted native design properties are known to render without
+     * keeping the original class CSS as a frontend fallback.
+     */
+    public function canStripCssFallbackForElementType(string $elementType): bool
+    {
+        return in_array($elementType, [
+            ElementTypes::ESSENTIAL_BUTTON,
+        ], true);
+    }
+
     private function applyCssProperty(array &$properties, string $boxCategory, string $cssProp, string $value): void
     {
         $value = trim($value);

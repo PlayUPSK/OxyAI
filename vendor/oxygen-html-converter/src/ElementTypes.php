@@ -35,6 +35,14 @@ final class ElementTypes
 
     // Breakdance Elements for Oxygen element
     public const ESSENTIAL_BUTTON = 'EssentialElements\\Button';
+    public const ESSENTIAL_HEADING = 'EssentialElements\\Heading';
+    public const ESSENTIAL_TEXT = 'EssentialElements\\Text';
+    public const ESSENTIAL_TEXT_LINK = 'EssentialElements\\TextLink';
+    public const ESSENTIAL_IMAGE = 'EssentialElements\\Image2';
+    public const ESSENTIAL_BASIC_LIST = 'EssentialElements\\BasicList';
+    public const ESSENTIAL_COLUMNS = 'EssentialElements\\Columns';
+    public const ESSENTIAL_COLUMN = 'EssentialElements\\Column';
+    public const ESSENTIAL_ICON = 'EssentialElements\\Icon';
 
     /**
      * All valid element types
@@ -52,6 +60,14 @@ final class ElementTypes
         self::JAVASCRIPT_CODE,
         self::HEADER,
         self::ESSENTIAL_BUTTON,
+        self::ESSENTIAL_HEADING,
+        self::ESSENTIAL_TEXT,
+        self::ESSENTIAL_TEXT_LINK,
+        self::ESSENTIAL_IMAGE,
+        self::ESSENTIAL_BASIC_LIST,
+        self::ESSENTIAL_COLUMNS,
+        self::ESSENTIAL_COLUMN,
+        self::ESSENTIAL_ICON,
     ];
 
     /**

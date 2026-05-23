@@ -14,16 +14,42 @@ class BuilderContractService
      */
     public function evaluateEssentialButtonContract(): array
     {
-        $requiredBaseClass = class_exists('\\Breakdance\\Elements\\Element')
-            ? '\\Breakdance\\Elements\\Element'
-            : null;
-
         return $this->evaluateElementContract(
             '\\EssentialElements\\Button',
             ['content.content.text', 'content.content.link.url'],
             'oxygen',
-            $requiredBaseClass
+            $this->requiredBaseClass()
         );
+    }
+
+    /**
+     * @return array<string, array{compatible:bool,class:string,issues:array,details:array}>
+     */
+    public function evaluateEssentialElementContracts(): array
+    {
+        $contracts = [
+            'button' => ['\\EssentialElements\\Button', ['content.content.text', 'content.content.link.url']],
+            'heading' => ['\\EssentialElements\\Heading', []],
+            'text' => ['\\EssentialElements\\Text', []],
+            'textLink' => ['\\EssentialElements\\TextLink', []],
+            'image' => ['\\EssentialElements\\Image2', []],
+            'basicList' => ['\\EssentialElements\\BasicList', ['content.content.items[].text']],
+            'columns' => ['\\EssentialElements\\Columns', []],
+            'column' => ['\\EssentialElements\\Column', []],
+            'icon' => ['\\EssentialElements\\Icon', []],
+        ];
+
+        $statuses = [];
+        foreach ($contracts as $key => [$className, $requiredDynamicPaths]) {
+            $statuses[$key] = $this->evaluateElementContract(
+                $className,
+                $requiredDynamicPaths,
+                'oxygen',
+                $this->requiredBaseClass()
+            );
+        }
+
+        return $statuses;
     }
 
     /**
@@ -180,5 +206,11 @@ class BuilderContractService
     {
         return '\\' . ltrim($className, '\\');
     }
-}
 
+    private function requiredBaseClass(): ?string
+    {
+        return class_exists('\\Breakdance\\Elements\\Element')
+            ? '\\Breakdance\\Elements\\Element'
+            : null;
+    }
+}

@@ -205,6 +205,14 @@ class SelectorMatcher
             'OxygenElements\\RichText' => 'div',
             'OxygenElements\\Header' => 'header',
             'EssentialElements\\Button' => 'button',
+            'EssentialElements\\Heading' => 'h2',
+            'EssentialElements\\Text' => 'div',
+            'EssentialElements\\TextLink' => 'a',
+            'EssentialElements\\Image2' => 'img',
+            'EssentialElements\\BasicList' => 'ul',
+            'EssentialElements\\Columns' => 'div',
+            'EssentialElements\\Column' => 'div',
+            'EssentialElements\\Icon' => 'div',
         ];
 
         return $mapping[$type] ?? null;

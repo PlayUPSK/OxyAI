@@ -312,6 +312,7 @@ final class McpController
                 'operation' => ['type' => 'string', 'description' => 'append, replace, or replace_node. Defaults to append.'],
                 'targetNodeId' => ['type' => 'integer', 'description' => 'Required for replace_node.'],
                 'dryRun' => ['type' => 'boolean', 'description' => 'Return the proposed tree without saving.'],
+                'registerSelectors' => ['type' => 'boolean', 'description' => 'Register and attach semantic classes as Oxygen selector IDs. Defaults true.'],
                 'options' => ['type' => 'object'],
             ], ['postId', 'html']),
             $this->tool('apply_oxygen_json_to_page', 'WRITES TO THE LIVE PAGE - always call once with dryRun:true first unless the user has explicitly approved the content. Directly applies a converted Oxygen rawJson/documentTree/element payload to a page. A restore backup is created when dryRun is false, but treat direct writes as hard to reverse: verify the page renders after applying. For replace_node, pass either a documentTree wrapper or a single node object with id, data, and children.', [
@@ -321,6 +322,7 @@ final class McpController
                 'operation' => ['type' => 'string', 'description' => 'append, replace, or replace_node. Defaults to append.'],
                 'targetNodeId' => ['type' => 'integer'],
                 'dryRun' => ['type' => 'boolean'],
+                'registerSelectors' => ['type' => 'boolean', 'description' => 'Register and attach semantic classes as Oxygen selector IDs. Defaults true.'],
             ], ['postId']),
             $this->tool('list_oxygen_page_backups', 'List recent OxyAI restore backups for a page.', [
                 'postId' => ['type' => 'integer'],
@@ -359,7 +361,7 @@ final class McpController
             ]),
             $this->tool('list_design_presets', 'List design presets available to OxyAI.', []),
             $this->tool('list_site_inspirations', 'List first-party OxyAI site inspiration directions for generation prompts.', []),
-            $this->tool('list_oxygen_element_capabilities', 'List Oxygen 6 and Breakdance Elements for Oxygen styling capabilities. Use this before deciding which CSS can become native design properties and which CSS must stay in class/CssCode fallback.', [
+            $this->tool('list_oxygen_element_capabilities', 'List Oxygen 6 and Breakdance Elements for Oxygen styling capabilities, auto-mapping rules, required content paths, and runtime element catalog. Use this before deciding which CSS can become native design properties or before hand-authoring any Oxygen/EssentialElements JSON.', [
                 'elementType' => ['type' => 'string', 'description' => 'Optional full element type, for example OxygenElements\\\\Container or EssentialElements\\\\Button.'],
             ]),
         ];

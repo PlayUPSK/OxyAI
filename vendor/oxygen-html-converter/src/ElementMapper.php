@@ -140,6 +140,13 @@ class ElementMapper
             return ElementTypes::CONTAINER;
         }
 
+        if ($this->preferEssentialElements && $node !== null) {
+            $essentialType = $this->getEssentialElementType($tag, $node);
+            if ($essentialType !== null) {
+                return $essentialType;
+            }
+        }
+
         // Special handling for links that should become ContainerLink
         if ($tag === 'a' && $node !== null) {
             // If the link has complex children or looks like a button, use ContainerLink
@@ -271,7 +278,9 @@ class ElementMapper
         $type = $this->getElementType($tag, $node);
 
         return $type === ElementTypes::CONTAINER ||
-               $type === ElementTypes::CONTAINER_LINK;
+               $type === ElementTypes::CONTAINER_LINK ||
+               $type === ElementTypes::ESSENTIAL_COLUMNS ||
+               $type === ElementTypes::ESSENTIAL_COLUMN;
     }
 
     /**
@@ -292,6 +301,9 @@ class ElementMapper
             ElementTypes::TEXT,
             ElementTypes::RICH_TEXT,
             ElementTypes::TEXT_LINK,
+            ElementTypes::ESSENTIAL_HEADING,
+            ElementTypes::ESSENTIAL_TEXT,
+            ElementTypes::ESSENTIAL_TEXT_LINK,
         ], true);
     }
 
@@ -342,6 +354,26 @@ class ElementMapper
 
             case ElementTypes::ESSENTIAL_BUTTON:
                 $properties = $this->buildEssentialButtonProperties($node);
+                break;
+
+            case ElementTypes::ESSENTIAL_HEADING:
+                $properties = $this->buildEssentialHeadingProperties($node);
+                break;
+
+            case ElementTypes::ESSENTIAL_TEXT:
+                $properties = $this->buildEssentialTextProperties($node);
+                break;
+
+            case ElementTypes::ESSENTIAL_TEXT_LINK:
+                $properties = $this->buildEssentialTextLinkProperties($node);
+                break;
+
+            case ElementTypes::ESSENTIAL_IMAGE:
+                $properties = $this->buildEssentialImageProperties($node);
+                break;
+
+            case ElementTypes::ESSENTIAL_BASIC_LIST:
+                $properties = $this->buildEssentialBasicListProperties($node);
                 break;
 
             case ElementTypes::IMAGE:
@@ -494,6 +526,117 @@ class ElementMapper
                 'content' => [
                     'text' => $text,
                     'link' => $link,
+                ],
+            ],
+        ];
+    }
+
+    private function buildEssentialHeadingProperties(DOMElement $node): array
+    {
+        $tag = strtolower($node->tagName);
+        $content = [
+            'text' => $this->getInnerHtml($node) ?: trim($node->textContent),
+        ];
+
+        if (in_array($tag, ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'], true)) {
+            $content['tags'] = $tag;
+        }
+
+        return [
+            'content' => [
+                'content' => $content,
+            ],
+        ];
+    }
+
+    private function buildEssentialTextProperties(DOMElement $node): array
+    {
+        return [
+            'content' => [
+                'content' => [
+                    'text' => $this->getInnerHtml($node) ?: trim($node->textContent),
+                ],
+            ],
+        ];
+    }
+
+    private function buildEssentialTextLinkProperties(DOMElement $node): array
+    {
+        $link = [
+            'type' => 'url',
+            'url' => $this->getLinkUrlForNode($node),
+        ];
+
+        if ($node->getAttribute('target') === '_blank') {
+            $link['openInNewTab'] = true;
+        }
+
+        return [
+            'content' => [
+                'content' => [
+                    'text' => $this->getInnerHtml($node) ?: trim($node->textContent),
+                    'link' => $link,
+                ],
+            ],
+        ];
+    }
+
+    private function buildEssentialImageProperties(DOMElement $node): array
+    {
+        $src = $node->getAttribute('src') ?: '';
+        $alt = $node->getAttribute('alt') ?: '';
+
+        $image = [
+            'from' => 'url',
+            'url' => $src,
+            'lazy_load' => true,
+            'alt_when_from_url' => $alt !== '' ? 'custom' : 'decorative',
+        ];
+
+        if ($alt !== '') {
+            $image['custom_alt_when_from_url'] = $alt;
+        }
+
+        return [
+            'content' => [
+                'image' => $image,
+            ],
+        ];
+    }
+
+    private function buildEssentialBasicListProperties(DOMElement $node): array
+    {
+        $items = [];
+        foreach ($node->childNodes as $child) {
+            if (!($child instanceof DOMElement) || strtolower($child->tagName) !== 'li') {
+                continue;
+            }
+
+            $item = [
+                'text' => $this->getInnerHtml($child) ?: trim($child->textContent),
+            ];
+
+            if ($this->listItemHasSingleLink($child)) {
+                $link = $this->firstElementChild($child);
+                if ($link instanceof DOMElement) {
+                    $item['text'] = $this->getInnerHtml($link) ?: trim($link->textContent);
+                    $item['link'] = [
+                        'type' => 'url',
+                        'url' => $this->getLinkUrlForNode($link),
+                    ];
+                    if ($link->getAttribute('target') === '_blank') {
+                        $item['link']['openInNewTab'] = true;
+                    }
+                }
+            }
+
+            $items[] = $item;
+        }
+
+        return [
+            'content' => [
+                'content' => [
+                    'items' => $items,
                 ],
             ],
         ];
@@ -730,26 +873,87 @@ class ElementMapper
             return false;
         }
 
-        if (trim($node->getAttribute('class')) !== '') {
-            return false;
-        }
-
         if ($this->hasElementChildren($node)) {
             return false;
         }
 
-        foreach ($node->attributes as $attribute) {
-            if (!($attribute instanceof \DOMAttr)) {
+        return trim((string) preg_replace('/\s+/', ' ', $node->textContent)) !== '';
+    }
+
+    private function getEssentialElementType(string $tag, DOMElement $node): ?string
+    {
+        if (in_array($tag, ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'], true) && $this->hasOnlyTextContent($node)) {
+            return ElementTypes::ESSENTIAL_HEADING;
+        }
+
+        if ($tag === 'a' && $this->hasOnlyTextContent($node)) {
+            return $this->isButtonLikeLink($node)
+                ? ElementTypes::ESSENTIAL_BUTTON
+                : ElementTypes::ESSENTIAL_TEXT_LINK;
+        }
+
+        if ($tag === 'img' && trim($node->getAttribute('src')) !== '') {
+            return ElementTypes::ESSENTIAL_IMAGE;
+        }
+
+        if (in_array($tag, ['ul', 'ol'], true) && $this->isSimpleList($node)) {
+            return ElementTypes::ESSENTIAL_BASIC_LIST;
+        }
+
+        return null;
+    }
+
+    private function isSimpleList(DOMElement $node): bool
+    {
+        $hasItem = false;
+        foreach ($node->childNodes as $child) {
+            if ($child instanceof DOMText && trim($child->textContent) === '') {
                 continue;
             }
 
-            $name = strtolower($attribute->name);
-            if (strpos($name, 'data-') === 0 || strpos($name, 'aria-') === 0) {
+            if (!($child instanceof DOMElement) || strtolower($child->tagName) !== 'li') {
+                return false;
+            }
+
+            $hasItem = true;
+            if (!$this->hasOnlyTextContent($child) && !$this->listItemHasSingleLink($child)) {
                 return false;
             }
         }
 
-        return trim((string) preg_replace('/\s+/', ' ', $node->textContent)) !== '';
+        return $hasItem;
+    }
+
+    private function listItemHasSingleLink(DOMElement $node): bool
+    {
+        $elementChildren = [];
+        foreach ($node->childNodes as $child) {
+            if ($child instanceof DOMText && trim($child->textContent) === '') {
+                continue;
+            }
+            if ($child instanceof DOMElement) {
+                $elementChildren[] = $child;
+                continue;
+            }
+            if (trim($child->textContent ?? '') !== '') {
+                return false;
+            }
+        }
+
+        return count($elementChildren) === 1
+            && strtolower($elementChildren[0]->tagName) === 'a'
+            && $this->hasOnlyTextContent($elementChildren[0]);
+    }
+
+    private function firstElementChild(DOMElement $node): ?DOMElement
+    {
+        foreach ($node->childNodes as $child) {
+            if ($child instanceof DOMElement) {
+                return $child;
+            }
+        }
+
+        return null;
     }
 
     private function buttonHasLinkTarget(DOMElement $node): bool
