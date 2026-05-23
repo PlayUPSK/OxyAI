@@ -149,9 +149,9 @@ foreach ($result['selectors'] as $registeredSelector) {
     $selectorsByName[$registeredSelector['name']] = $registeredSelector;
 }
 
-$selector = $selectorsByName['.breakdance .oxyai-test-hero'];
-assert($selector['type'] === 'custom');
-assert($selector['name'] === '.breakdance .oxyai-test-hero');
+$selector = $selectorsByName['oxyai-test-hero'];
+assert($selector['type'] === 'class');
+assert($selector['name'] === 'oxyai-test-hero');
 
 $props = $selector['properties']['breakpoint_base'] ?? [];
 assert(($props['spacing']['spacing']['padding']['editMode'] ?? null) === 'advanced');
@@ -166,11 +166,14 @@ assert(($props['layout']['flex_align']['primary_axis'] ?? null) === 'space-betwe
 assert(($props['typography']['color'] ?? null) === '#0f172a');
 assert(!isset($props['unsupported_bucket']));
 
-$firstCard = $selectorsByName['.breakdance .first-card'];
+$firstCard = $selectorsByName['first-card'];
 assert(($firstCard['properties'] ?? []) === []);
 
 assert(!isset($tree['root']['data']['properties']['meta']['_oxyaiSelectorDesign']));
 assert(!isset($tree['root']['children'][1]['data']['properties']['meta']['_oxyaiSelectorDesign']));
 assert(in_array($selector['id'], $tree['root']['data']['properties']['meta']['classes'] ?? [], true));
+assert(($tree['root']['data']['properties']['settings']['advanced']['classes'] ?? null) === []);
+assert(($tree['root']['children'][0]['data']['properties']['settings']['advanced']['classes'] ?? null) === []);
+assert(($tree['root']['children'][1]['data']['properties']['settings']['advanced']['classes'] ?? null) === []);
 
 echo "selector-properties-ok\n";

@@ -92,7 +92,7 @@ final class SelectorRegistrationService
             'registryOption' => self::SELECTORS_OPTION,
             'collectionsOption' => self::COLLECTIONS_OPTION,
             'collection' => self::COLLECTION_NAME,
-            'note' => 'Runtime classes remain in settings.advanced.classes; direct class styles are stored on matching Oxygen selector properties and selector IDs are attached in meta.classes for editor visibility.',
+            'note' => 'Runtime classes are promoted to Oxygen selector IDs in meta.classes; direct class styles are stored on matching selector properties for editor visibility and compiled selector CSS.',
         ];
     }
 
@@ -255,6 +255,7 @@ final class SelectorRegistrationService
         $merged = array_values(array_unique(array_merge($existing, $selectorIds)));
         $node['data']['properties']['meta']['classes'] = $merged;
         $node['data']['properties']['meta']['classes_conditions'] = $node['data']['properties']['meta']['classes_conditions'] ?? [];
+        $this->removePromotedRuntimeClasses($node, $selectors);
         $attachedElements++;
     }
 
@@ -287,8 +288,8 @@ final class SelectorRegistrationService
     {
         return [
             'id' => $this->uuidForClassName($className),
-            'name' => '.breakdance .' . $className,
-            'type' => 'custom',
+            'name' => $className,
+            'type' => 'class',
             'properties' => [],
             'children' => [],
             'collection' => self::COLLECTION_NAME,
@@ -318,6 +319,35 @@ final class SelectorRegistrationService
         }
 
         return null;
+    }
+
+    /**
+     * @param array<string, mixed> $node
+     * @param array<string, array<string, mixed>> $selectors
+     */
+    private function removePromotedRuntimeClasses(array &$node, array $selectors): void
+    {
+        $nodeClasses = $node['data']['properties']['settings']['advanced']['classes'] ?? [];
+        if (!is_array($nodeClasses) || $nodeClasses === []) {
+            return;
+        }
+
+        $remainingClasses = [];
+        foreach ($nodeClasses as $className) {
+            if (!is_string($className)) {
+                $remainingClasses[] = $className;
+                continue;
+            }
+
+            $normalized = $this->normalizeClassName($className);
+            if ($normalized !== null && isset($selectors[$normalized])) {
+                continue;
+            }
+
+            $remainingClasses[] = $className;
+        }
+
+        $node['data']['properties']['settings']['advanced']['classes'] = array_values($remainingClasses);
     }
 
     /**
