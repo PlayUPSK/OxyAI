@@ -62,6 +62,15 @@ final class OxygenPageMutationService
             : null;
         $dryRun = !empty($options['dryRun']);
 
+        $registerSelectorsInput = $options['registerSelectors'] ?? $options['options']['registerSelectors'] ?? true;
+        $registerSelectors = filter_var($registerSelectorsInput, FILTER_VALIDATE_BOOLEAN);
+        $selectorRegistration = null;
+        $selectorRegistrationService = null;
+        if ($registerSelectors) {
+            $selectorRegistrationService = new SelectorRegistrationService();
+            $selectorRegistration = $selectorRegistrationService->registerTreeSelectors($incomingTree, false);
+        }
+
         $existingTree = $this->readTree($postId);
         $newTree = $this->mergeTree($existingTree, $incomingTree, $operation, $targetNodeId);
         if (is_wp_error($newTree)) {
@@ -81,6 +90,10 @@ final class OxygenPageMutationService
             'editUrl' => get_edit_post_link($postId, 'raw'),
         ];
 
+        if ($selectorRegistration !== null) {
+            $result['selectorRegistration'] = $selectorRegistration;
+        }
+
         if ($dryRun) {
             $result['tree'] = $newTree;
             return $result;
@@ -92,6 +105,9 @@ final class OxygenPageMutationService
         ]);
 
         $this->writeTree($postId, $newTree);
+        if ($selectorRegistrationService !== null && is_array($selectorRegistration['selectors'] ?? null)) {
+            $selectorRegistrationService->persistSelectors($selectorRegistration['selectors']);
+        }
         $this->refreshCaches($postId);
 
         $shouldRecompile = !empty($options['recompile']) || !empty($options['options']['recompile']);

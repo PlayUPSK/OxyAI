@@ -10,6 +10,7 @@ namespace OxyHtmlConverter\Services;
 class EnvironmentService
 {
     private ?BuilderContractService $builderContractService = null;
+    private ?BuilderElementCatalogService $builderElementCatalogService = null;
     private ?array $essentialButtonContractStatus = null;
 
     /**
@@ -147,6 +148,26 @@ class EnvironmentService
     {
         $status = $this->getEssentialButtonContractStatus();
         return (bool) ($status['compatible'] ?? false);
+    }
+
+    /**
+     * @return array<string, array{compatible:bool,class:string,issues:array,details:array}>
+     */
+    public function getEssentialElementContractStatuses(): array
+    {
+        return $this->getBuilderContractService()->evaluateEssentialElementContracts();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getBuilderElementCatalog(): array
+    {
+        if ($this->builderElementCatalogService === null) {
+            $this->builderElementCatalogService = new BuilderElementCatalogService();
+        }
+
+        return $this->builderElementCatalogService->catalog();
     }
 
     /**
