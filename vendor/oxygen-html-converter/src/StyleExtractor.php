@@ -247,11 +247,7 @@ class StyleExtractor
         if (str_starts_with($cssProp, 'padding-') || str_starts_with($cssProp, 'margin-')) {
             [$type, $side] = explode('-', $cssProp, 2);
             if (in_array($side, ['top', 'right', 'bottom', 'left'], true)) {
-                $this->setNestedValue(
-                    $properties,
-                    [$boxCategory, $type, self::BREAKPOINT, $side],
-                    $this->normalizeLength($value)
-                );
+                $this->setBoxSpacing($properties, $boxCategory, $type, [$side => $value], false);
             }
             return;
         }
@@ -339,19 +335,40 @@ class StyleExtractor
     /**
      * @param array<string, string> $sides
      */
-    private function setBoxSpacing(array &$properties, string $boxCategory, string $type, array $sides): void
+    private function setBoxSpacing(array &$properties, string $boxCategory, string $type, array $sides, bool $fromShorthand = true): void
     {
+        $path = [$boxCategory, $type, self::BREAKPOINT];
+        $existing = $this->getNestedValue($properties, $path);
+        $spacing = is_array($existing) ? $existing : [];
+
         foreach (['top', 'right', 'bottom', 'left'] as $side) {
             if (!isset($sides[$side])) {
                 continue;
             }
 
-            $this->setNestedValue(
-                $properties,
-                [$boxCategory, $type, self::BREAKPOINT, $side],
-                $this->normalizeLength((string) $sides[$side])
-            );
+            $spacing[$side] = $this->normalizeLength((string) $sides[$side]);
         }
+
+        if ($fromShorthand) {
+            $sideValues = [
+                (string) ($sides['top'] ?? ''),
+                (string) ($sides['right'] ?? ''),
+                (string) ($sides['bottom'] ?? ''),
+                (string) ($sides['left'] ?? ''),
+            ];
+            $allEqual = count(array_unique($sideValues)) === 1;
+            if ($allEqual) {
+                $spacing['all'] = $this->normalizeLength($sideValues[0]);
+            } else {
+                unset($spacing['all']);
+            }
+            $spacing['editMode'] = $allEqual ? 'all' : 'advanced';
+        } else {
+            unset($spacing['all']);
+            $spacing['editMode'] = 'advanced';
+        }
+
+        $this->setNestedValue($properties, $path, $spacing);
     }
 
     /**
