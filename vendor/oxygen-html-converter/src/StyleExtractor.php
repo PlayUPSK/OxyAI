@@ -230,7 +230,10 @@ class StyleExtractor
         }
 
         if ($cssProp === 'font-weight') {
-            $this->setBreakpointValue($properties, ['typography', 'font_weight'], $this->normalizeFontWeight($value));
+            $fontWeight = $this->normalizeFontWeight($value);
+            if ($fontWeight !== null) {
+                $this->setBreakpointValue($properties, ['typography', 'font_weight'], $fontWeight);
+            }
             return;
         }
 
@@ -601,6 +604,10 @@ class StyleExtractor
             return $this->parseRadiusShorthand($value) !== null;
         }
 
+        if ($cssProp === 'font-weight') {
+            return $this->normalizeFontWeight($value) !== null;
+        }
+
         return true;
     }
 
@@ -689,13 +696,13 @@ class StyleExtractor
     }
 
     /**
-     * @return int|string
+     * @return int|null
      */
-    private function normalizeFontWeight(string $value)
+    private function normalizeFontWeight(string $value): ?int
     {
         $trimmed = trim($value);
         if ($trimmed === '') {
-            return $trimmed;
+            return null;
         }
 
         $normalized = strtolower($trimmed);
@@ -712,21 +719,7 @@ class StyleExtractor
             return (int) $trimmed;
         }
 
-        $validKeywords = [
-            'bolder',
-            'lighter',
-            'inherit',
-            'initial',
-            'revert',
-            'revert-layer',
-            'unset',
-        ];
-
-        if (in_array($normalized, $validKeywords, true)) {
-            return $normalized;
-        }
-
-        return $trimmed;
+        return null;
     }
 
     private function boxCategoryForElement(string $elementType): string
