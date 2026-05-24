@@ -1,0 +1,89 @@
+name: Release plugin
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - oxyai-oxygen.php
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish WordPress plugin zip
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read plugin version
+        id: version
+        shell: bash
+        run: |
+          version="$(awk -F': ' '/^[[:space:]]*\* Version:/ { print $2; exit }' oxyai-oxygen.php | tr -d '[:space:]')"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9]+)?$ ]]; then
+            echo "Could not read a valid semantic version from oxyai-oxygen.php" >&2
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "zip=oxyai-$version.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Stop if release already exists
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release $TAG already exists; skipping."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build installable plugin zip
+        if: steps.existing.outputs.exists == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf build release
+          mkdir -p build/oxyai release
+
+          rsync -a \
+            --include='assets/***' \
+            --include='src/***' \
+            --include='vendor/***' \
+            --include='composer.json' \
+            --include='index.php' \
+            --include='LICENSE' \
+            --include='oxyai-oxygen.php' \
+            --include='README.md' \
+            --exclude='*' \
+            ./ build/oxyai/
+
+          cd build
+          zip -r "../release/${{ steps.version.outputs.zip }}" oxyai
+
+      - name: Create GitHub release
+        if: steps.existing.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          ZIP: ${{ steps.version.outputs.zip }}
+        shell: bash
+        run: |
+          gh release create "$TAG" "release/$ZIP" \
+            --target "$GITHUB_SHA" \
+            --title "OxyAI Oxygen $VERSION" \
+            --notes "Installable WordPress plugin package for OxyAI Oxygen $VERSION. Download $ZIP, unzip it into wp-content/plugins, and activate OxyAI Oxygen in WordPress."
