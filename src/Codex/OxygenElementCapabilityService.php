@@ -19,8 +19,15 @@ final class OxygenElementCapabilityService
         $builderElementCatalog = $environment->getBuilderElementCatalog();
         $elements = $this->elements();
 
-        if ($elementType !== null && $elementType !== '') {
-            $elements = array_intersect_key($elements, [$elementType => true]);
+        $requestedElementType = $elementType !== null ? ltrim($elementType, '\\') : null;
+        if ($requestedElementType !== null && $requestedElementType !== '') {
+            $elements = array_intersect_key($elements, [$requestedElementType => true]);
+            if ($elements === []) {
+                $runtimeElement = $this->runtimeElement($requestedElementType, $builderElementCatalog);
+                if ($runtimeElement !== null) {
+                    $elements = [$requestedElementType => $runtimeElement];
+                }
+            }
         }
 
         return [
@@ -28,15 +35,22 @@ final class OxygenElementCapabilityService
             'oxygenVersionTarget' => 'Oxygen 6 / Breakdance Oxygen',
             'breakdanceElementsForOxygen' => [
                 'detected' => $environment->isBreakdanceElementsForOxygenActive(),
+                'formsDetected' => $environment->isBreakdanceFormsForOxygenActive(),
                 'essentialButtonContractCompatible' => $environment->isEssentialButtonContractCompatible(),
                 'preferredButtonMapping' => $environment->shouldPreferEssentialElements()
                     ? ElementTypes::ESSENTIAL_BUTTON
                     : ElementTypes::CONTAINER,
                 'contractStatuses' => $essentialContracts,
                 'runtimeCatalog' => $builderElementCatalog,
+                'coverageSummary' => [
+                    'essentialElementsLoaded' => $builderElementCatalog['coverage']['essentialElementsLoaded'] ?? 0,
+                    'breakdanceElementsForOxygenLoaded' => $builderElementCatalog['coverage']['breakdanceElementsForOxygenLoaded'] ?? 0,
+                    'breakdanceFormsForOxygenLoaded' => $builderElementCatalog['coverage']['breakdanceFormsForOxygenLoaded'] ?? 0,
+                ],
                 'autoMappedWhenPreferred' => [
                     ElementTypes::ESSENTIAL_BUTTON => 'button tags and button-like links with text-only content',
                     ElementTypes::ESSENTIAL_HEADING => 'h1-h6 tags with text-only or inline-formatted content',
+                    ElementTypes::ESSENTIAL_TEXT => 'p/span tags with simple text-only or inline-formatted content',
                     ElementTypes::ESSENTIAL_TEXT_LINK => 'plain text links that are not button-like',
                     ElementTypes::ESSENTIAL_IMAGE => 'img tags with a usable src attribute',
                     ElementTypes::ESSENTIAL_BASIC_LIST => 'ul/ol lists whose li children contain only text or a single plain link',
@@ -46,21 +60,63 @@ final class OxygenElementCapabilityService
                     'Complex widgets such as tabs, accordions, menus, forms, and WooCommerce elements require dedicated content contracts and are reported as available only after explicit support is added.',
                 ],
             ],
+            'breakdanceFormsForOxygen' => [
+                'detected' => $environment->isBreakdanceFormsForOxygenActive(),
+                'runtimeCatalog' => $builderElementCatalog['breakdanceFormsForOxygen'] ?? [],
+                'contractStatuses' => array_intersect_key($essentialContracts, array_flip(['formBuilder', 'loginForm', 'registerForm'])),
+                'safeHandAuthoredTargets' => [
+                    ElementTypes::ESSENTIAL_FORM_BUILDER => 'Contact/newsletter-style forms when fields, submit text, success/error messages, and actions are intentionally provided.',
+                    ElementTypes::ESSENTIAL_LOGIN_FORM => 'Login forms when submit/success labels and optional lost-password/register settings are intentionally provided.',
+                    ElementTypes::ESSENTIAL_REGISTER_FORM => 'Registration forms when submit/success labels and redirect URL are intentionally provided.',
+                ],
+                'autoMapping' => false,
+                'notes' => [
+                    'Do not turn arbitrary <form> HTML into a Breakdance form unless the field/action contract is explicit; preserve unknown forms as HtmlCode.',
+                    'FormBuilder defaultProperties depends on WordPress user/options at runtime, so agents should send complete content.form fields and actions when hand-authoring.',
+                ],
+            ],
             'nativeDesignPolicy' => [
                 'Use native design properties only for supported element/property pairs listed here.',
                 'Every native style value must be written under breakpoint_base unless a real responsive mapping is implemented.',
                 'Length values must use Oxygen structured values: {number, unit, style}.',
                 'For plain Oxygen Container/Text/Image elements, OxyAI stores direct class selector styles in the Oxygen selector library so the editor and compiler can see them.',
                 'Only strip class CSS for element types explicitly marked cssFallbackCanBeStripped=true.',
-                'Keep class CSS in CssCode for pseudo selectors, media queries, keyframes, complex selectors, responsive variants, and any unverified property.',
+                'Direct single-class @media (max-width) rules can map to Oxygen breakpoint selector properties when every declaration is supported. Keep other media queries in CssCode.',
                 'Do not strip CssCode fallback unless conversion audit proves every declaration in the selector was consumed natively.',
+            ],
+            'selectorCompilerSupport' => [
+                'nativeResponsiveMapping' => [
+                    '@media (max-width:1119px)' => 'breakpoint_tablet_landscape',
+                    '@media (max-width:1023px)' => 'breakpoint_tablet_portrait',
+                    '@media (max-width:767px)' => 'breakpoint_phone_landscape',
+                    '@media (max-width:479px)' => 'breakpoint_phone_portrait',
+                ],
+                'nativeResponsiveSelectorScope' => 'Only direct single-class selectors such as .hero-title are mapped into Oxygen selector breakpoints. Descendant/grouped/pseudo/keyframe/container-query rules remain CSS fallback.',
+                'verifiedNativeSelectorCss' => [
+                    'display:flex',
+                    'flex-direction via Oxygen flex-flow output',
+                    'justify-content',
+                    'align-items',
+                    'gap',
+                    'width/max-width/height',
+                    'position/top/right/bottom/left/z-index',
+                    'background-color',
+                    'padding/margin side values',
+                    'border-radius',
+                    'typography color/size/weight/line-height/letter-spacing/text-transform/text-align',
+                ],
+                'knownNativeSelectorGaps' => [
+                    'grid-template-columns and grid-template-rows are captured in design data but not emitted by the Oxygen selector compiler on the verified Oxygen 6 site.',
+                    'flex-wrap, flex-grow, flex-shrink, and flex-basis are captured in design data but were not emitted by the selector compiler on the verified Oxygen 6 site.',
+                    'Use percentage widths or keep a CSS fallback for layouts that require wrapping, CSS grid, complex media queries, or flex item growth/shrink behavior.',
+                ],
             ],
             'classStylingPolicy' => [
                 'Always preserve stable semantic classes on generated elements.',
                 'Class CSS is the authoritative fallback for visual fidelity.',
                 'Direct single-class selectors such as .hero-title are registered as Oxygen selector properties when registerSelectors is enabled.',
                 'Prefer simple selectors scoped to the generated root class so OxyAI can map editable selector properties safely.',
-                'Keep descendant selectors, grouped selectors, pseudo states, media queries, and animations in CssCode.',
+                'Keep descendant selectors, grouped selectors, pseudo states, unsupported media queries, and animations in CssCode.',
             ],
             'elements' => array_values($elements),
         ];
@@ -231,12 +287,12 @@ final class OxygenElementCapabilityService
             ),
             ElementTypes::ESSENTIAL_TEXT => $this->element(
                 ElementTypes::ESSENTIAL_TEXT,
-                'Breakdance Elements for Oxygen text. Supported as a hand-authored target; not auto-mapped from p/span yet because tag semantics need more verification.',
+                'Breakdance Elements for Oxygen text. Auto-mapped for p/span with simple text-only or inline-formatted content when the plugin contract is compatible.',
                 ['typography', 'size', 'spacing'],
                 array_merge($typographyStyles, $sizeStyles, ['margin-top', 'margin-bottom']),
                 [
                     'requiresBreakdanceElementsForOxygen' => true,
-                    'autoMapping' => false,
+                    'autoMapping' => 'p/span tags with text-only or inline-formatted content',
                     'requiredContentPaths' => ['content.content.text'],
                     'cssFallbackCanBeStripped' => false,
                 ]
@@ -298,7 +354,127 @@ final class OxygenElementCapabilityService
                 ['color', 'font-size', 'width', 'height', 'margin-top', 'margin-bottom'],
                 ['requiresBreakdanceElementsForOxygen' => true, 'autoMapping' => false, 'cssFallbackCanBeStripped' => false]
             ),
+            ElementTypes::ESSENTIAL_FORM_BUILDER => $this->element(
+                ElementTypes::ESSENTIAL_FORM_BUILDER,
+                'Breakdance Forms for Oxygen Form Builder. Hand-author only when fields/actions are explicit; arbitrary HTML forms should remain HtmlCode.',
+                ['container', 'form', 'layout', 'spacing'],
+                array_merge($sharedBoxStyles, $typographyStyles, $sizeStyles, ['gap', 'margin-top', 'margin-bottom']),
+                [
+                    'requiresBreakdanceFormsForOxygen' => true,
+                    'autoMapping' => false,
+                    'requiredContentPaths' => [
+                        'content.form.form_name',
+                        'content.form.fields[].type',
+                        'content.form.fields[].label',
+                        'content.form.fields[].advanced.id',
+                        'content.form.submit_text',
+                        'content.form.success_message',
+                        'content.actions.actions',
+                    ],
+                    'cssFallbackCanBeStripped' => false,
+                ]
+            ),
+            ElementTypes::ESSENTIAL_LOGIN_FORM => $this->element(
+                ElementTypes::ESSENTIAL_LOGIN_FORM,
+                'Breakdance Forms for Oxygen Login Form. Hand-author only when the login behavior and labels are intended.',
+                ['form', 'layout', 'spacing'],
+                array_merge($sharedBoxStyles, $typographyStyles, $sizeStyles, ['margin-top', 'margin-bottom']),
+                [
+                    'requiresBreakdanceFormsForOxygen' => true,
+                    'autoMapping' => false,
+                    'requiredContentPaths' => ['content.form.submit_text', 'content.form.success_message'],
+                    'cssFallbackCanBeStripped' => false,
+                ]
+            ),
+            ElementTypes::ESSENTIAL_REGISTER_FORM => $this->element(
+                ElementTypes::ESSENTIAL_REGISTER_FORM,
+                'Breakdance Forms for Oxygen Register Form. Hand-author only when registration is intentionally desired.',
+                ['form', 'layout', 'spacing'],
+                array_merge($sharedBoxStyles, $typographyStyles, $sizeStyles, ['margin-top', 'margin-bottom']),
+                [
+                    'requiresBreakdanceFormsForOxygen' => true,
+                    'autoMapping' => false,
+                    'requiredContentPaths' => ['content.form.submit_text', 'content.form.success_message', 'content.form.redirect_url'],
+                    'cssFallbackCanBeStripped' => false,
+                ]
+            ),
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $builderElementCatalog
+     * @return array<string, mixed>|null
+     */
+    private function runtimeElement(string $elementType, array $builderElementCatalog): ?array
+    {
+        $normalized = '\\' . ltrim($elementType, '\\');
+        $catalogs = [
+            $builderElementCatalog['essentialElements'] ?? [],
+            $builderElementCatalog['oxygenElements'] ?? [],
+        ];
+
+        foreach ($catalogs as $catalog) {
+            if (!is_array($catalog)) {
+                continue;
+            }
+
+            foreach ($catalog as $entry) {
+                if (!is_array($entry)) {
+                    continue;
+                }
+
+                $class = '\\' . ltrim((string) ($entry['class'] ?? ''), '\\');
+                if ($class !== $normalized) {
+                    continue;
+                }
+
+                return [
+                    'type' => ltrim($normalized, '\\'),
+                    'description' => 'Runtime builder element loaded by Oxygen/Breakdance. OxyAI exposes its contract for hand-authored MCP JSON, but does not claim automatic conversion unless autoMapping is explicitly enabled.',
+                    'runtime' => $entry,
+                    'nativeDesignBuckets' => [],
+                    'nativeCssProperties' => [],
+                    'cssFallbackCanBeStripped' => false,
+                    'autoMapping' => false,
+                    'requiredContentPaths' => $this->dynamicPropertyPaths($entry),
+                    'mustRemainClassCss' => [
+                        'unknown element-specific design schema',
+                        'unsupported media queries',
+                        'pseudo selectors',
+                        'complex selectors',
+                        'unverified property paths',
+                    ],
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $runtimeEntry
+     * @return array<int, string>
+     */
+    private function dynamicPropertyPaths(array $runtimeEntry): array
+    {
+        $paths = [];
+        $dynamicPaths = $runtimeEntry['dynamicPropertyPaths'] ?? [];
+        if (!is_array($dynamicPaths)) {
+            return [];
+        }
+
+        foreach ($dynamicPaths as $dynamicPath) {
+            if (!is_array($dynamicPath)) {
+                continue;
+            }
+
+            $path = $dynamicPath['path'] ?? null;
+            if (is_string($path) && $path !== '') {
+                $paths[] = $path;
+            }
+        }
+
+        return array_values(array_unique($paths));
     }
 
     /**
@@ -333,11 +509,11 @@ final class OxygenElementCapabilityService
                 'overflow' => 'overflow.{property}.breakpoint_base',
             ],
             'mustRemainClassCss' => [
-                'media queries',
+                'unsupported media queries',
                 'pseudo selectors',
                 'keyframes and animations',
                 'complex selectors',
-                'responsive variants until media queries map to Oxygen breakpoints',
+                'responsive variants outside direct single-class max-width media rules',
                 'unknown or unverified Oxygen schema paths',
             ],
         ], $extra);

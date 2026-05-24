@@ -100,6 +100,29 @@ class EnvironmentService
     }
 
     /**
+     * Check if Breakdance Forms for Oxygen plugin is active.
+     */
+    public function isBreakdanceFormsForOxygenActive(): bool
+    {
+        if (defined('BREAKDANCE_FORMS_FOR_OXYGEN_VERSION')) {
+            return true;
+        }
+
+        if (class_exists('\\EssentialElements\\FormBuilder')
+            || class_exists('\\EssentialElements\\LoginForm')
+            || class_exists('\\EssentialElements\\RegisterForm')
+        ) {
+            return true;
+        }
+
+        if (function_exists('is_plugin_active')) {
+            return is_plugin_active('breakdance-forms-for-oxygen/plugin.php');
+        }
+
+        return false;
+    }
+
+    /**
      * Get element mapping mode.
      *
      * @return string 'auto', 'oxygen', or 'essential'

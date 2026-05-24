@@ -10,6 +10,7 @@ use DOMElement;
 class StyleExtractor
 {
     private const BREAKPOINT = 'breakpoint_base';
+    private string $currentBreakpoint = self::BREAKPOINT;
 
     /**
      * CSS properties this extractor can translate into Oxygen-readable design schema.
@@ -145,20 +146,30 @@ class StyleExtractor
     /**
      * Convert extracted styles to Oxygen properties format
      */
-    public function toOxygenProperties(array $styles, string $elementType = ElementTypes::CONTAINER): array
+    public function toOxygenProperties(
+        array $styles,
+        string $elementType = ElementTypes::CONTAINER,
+        string $breakpoint = self::BREAKPOINT
+    ): array
     {
         $properties = [];
         $boxCategory = $this->boxCategoryForElement($elementType);
+        $previousBreakpoint = $this->currentBreakpoint;
+        $this->currentBreakpoint = $breakpoint !== '' ? $breakpoint : self::BREAKPOINT;
 
-        foreach ($styles as $cssProp => $value) {
-            $cssProp = strtolower((string) $cssProp);
+        try {
+            foreach ($styles as $cssProp => $value) {
+                $cssProp = strtolower((string) $cssProp);
 
-            // Skip internal properties
-            if (strpos($cssProp, '_') === 0) {
-                continue;
+                // Skip internal properties
+                if (strpos($cssProp, '_') === 0) {
+                    continue;
+                }
+
+                $this->applyCssProperty($properties, $boxCategory, $cssProp, (string) $value);
             }
-
-            $this->applyCssProperty($properties, $boxCategory, $cssProp, (string) $value);
+        } finally {
+            $this->currentBreakpoint = $previousBreakpoint;
         }
 
         return $properties;
@@ -337,7 +348,7 @@ class StyleExtractor
 
     private function setBreakpointValue(array &$properties, array $path, $value): void
     {
-        $this->setNestedValue($properties, array_merge($path, [self::BREAKPOINT]), $value);
+        $this->setNestedValue($properties, array_merge($path, [$this->currentBreakpoint]), $value);
     }
 
     /**
@@ -345,7 +356,7 @@ class StyleExtractor
      */
     private function setBoxSpacing(array &$properties, string $boxCategory, string $type, array $sides, bool $fromShorthand = true): void
     {
-        $path = [$boxCategory, $type, self::BREAKPOINT];
+        $path = [$boxCategory, $type, $this->currentBreakpoint];
         $existing = $this->getNestedValue($properties, $path);
         $spacing = is_array($existing) ? $existing : [];
 
@@ -384,7 +395,7 @@ class StyleExtractor
      */
     private function setBorderRadius(array &$properties, string $boxCategory, array $corners, bool $fromShorthand = false): void
     {
-        $path = [$boxCategory, 'borders', 'radius', self::BREAKPOINT];
+        $path = [$boxCategory, 'borders', 'radius', $this->currentBreakpoint];
         $existing = $this->getNestedValue($properties, $path);
         $radius = is_array($existing) ? $existing : [];
 

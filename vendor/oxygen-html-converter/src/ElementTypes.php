@@ -43,6 +43,9 @@ final class ElementTypes
     public const ESSENTIAL_COLUMNS = 'EssentialElements\\Columns';
     public const ESSENTIAL_COLUMN = 'EssentialElements\\Column';
     public const ESSENTIAL_ICON = 'EssentialElements\\Icon';
+    public const ESSENTIAL_FORM_BUILDER = 'EssentialElements\\FormBuilder';
+    public const ESSENTIAL_LOGIN_FORM = 'EssentialElements\\LoginForm';
+    public const ESSENTIAL_REGISTER_FORM = 'EssentialElements\\RegisterForm';
 
     /**
      * All valid element types
@@ -68,6 +71,9 @@ final class ElementTypes
         self::ESSENTIAL_COLUMNS,
         self::ESSENTIAL_COLUMN,
         self::ESSENTIAL_ICON,
+        self::ESSENTIAL_FORM_BUILDER,
+        self::ESSENTIAL_LOGIN_FORM,
+        self::ESSENTIAL_REGISTER_FORM,
     ];
 
     /**

@@ -905,6 +905,13 @@ class ElementMapper
             return ElementTypes::ESSENTIAL_HEADING;
         }
 
+        if ($this->isEssentialCompatible('text')
+            && in_array($tag, ['p', 'span'], true)
+            && $this->hasOnlyTextContent($node)
+        ) {
+            return ElementTypes::ESSENTIAL_TEXT;
+        }
+
         if ($tag === 'a' && $this->hasOnlyTextContent($node)) {
             if ($this->isButtonLikeLink($node)) {
                 return $this->isEssentialCompatible('button') ? ElementTypes::ESSENTIAL_BUTTON : null;

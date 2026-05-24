@@ -13,7 +13,7 @@ class CssParser
      * @param string $css
      * @return array Array of [selector, declarations]
      */
-    public function parse(string $css): array
+    public function parse(string $css, ?string $breakpoint = null): array
     {
         $rules = [];
 
@@ -39,6 +39,8 @@ class CssParser
                 }
                 if ($depth === 1 && !$isAtRule) {
                     $block .= $char;
+                } elseif ($depth >= 1 && $isAtRule) {
+                    $block .= $char;
                 }
                 continue;
             }
@@ -47,6 +49,8 @@ class CssParser
                 $inString = true;
                 $stringChar = $char;
                 if ($depth === 1 && !$isAtRule) {
+                    $block .= $char;
+                } elseif ($depth >= 1 && $isAtRule) {
                     $block .= $char;
                 }
                 continue;
@@ -62,7 +66,7 @@ class CssParser
                     // Opening brace for a normal rule — don't add to block
                     continue;
                 }
-                if ($depth > 1 && !$isAtRule) {
+                if ($depth > 1) {
                     $block .= $char;
                 }
                 continue;
@@ -82,31 +86,60 @@ class CssParser
                                 $rules[] = [
                                     'selector' => $sel,
                                     'declarations' => $declarations,
+                                    'breakpoint' => $breakpoint ?? 'breakpoint_base',
                                 ];
                             }
                         }
+                    } elseif ($isAtRule) {
+                        $mediaBreakpoint = $this->breakpointFromAtRule($selector);
+                        if ($mediaBreakpoint !== null) {
+                            array_push($rules, ...$this->parse($block, $mediaBreakpoint));
+                        }
                     }
-                    // Reset for next rule (at-rules are skipped)
+                    // Reset for next rule
                     $selector = '';
                     $block = '';
                     $isAtRule = false;
                     continue;
                 }
-                if (!$isAtRule) {
-                    $block .= $char;
-                }
+                $block .= $char;
                 continue;
             }
 
             // Accumulate characters
             if ($depth === 0) {
                 $selector .= $char;
-            } elseif ($depth >= 1 && !$isAtRule) {
+            } elseif ($depth >= 1) {
                 $block .= $char;
             }
         }
 
         return $rules;
+    }
+
+    private function breakpointFromAtRule(string $selector): ?string
+    {
+        $selector = trim($selector);
+        if (!preg_match('/^@media\b/i', $selector)) {
+            return null;
+        }
+
+        if (!preg_match('/max-width\s*:\s*(\d+(?:\.\d+)?)px/i', $selector, $matches)) {
+            return null;
+        }
+
+        $maxWidth = (float) $matches[1];
+        if ($maxWidth <= 479) {
+            return 'breakpoint_phone_portrait';
+        }
+        if ($maxWidth <= 767) {
+            return 'breakpoint_phone_landscape';
+        }
+        if ($maxWidth <= 1023) {
+            return 'breakpoint_tablet_portrait';
+        }
+
+        return 'breakpoint_tablet_landscape';
     }
 
     /**

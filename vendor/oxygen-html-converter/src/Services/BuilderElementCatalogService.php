@@ -17,15 +17,21 @@ class BuilderElementCatalogService
     {
         $essential = $this->catalogNamespace('EssentialElements\\');
         $oxygen = $this->catalogNamespace('OxygenElements\\');
+        $breakdanceElements = $this->filterByCategory($essential, 'breakdance-elements-for-oxygen');
+        $breakdanceForms = $this->filterByCategory($essential, 'breakdance-forms-for-oxygen');
 
         return [
             'coverage' => [
                 'essentialElementsLoaded' => count($essential),
                 'oxygenElementsLoaded' => count($oxygen),
+                'breakdanceElementsForOxygenLoaded' => count($breakdanceElements),
+                'breakdanceFormsForOxygenLoaded' => count($breakdanceForms),
                 'mode' => 'runtime_declared_classes',
-                'note' => 'Coverage reflects builder element classes loaded in the current WordPress request. Missing plugins or lazily unloaded classes cannot be inspected until WordPress/Oxygen loads them.',
+                'note' => 'Coverage reflects builder element classes loaded in the current WordPress request. Breakdance Elements/Forms for Oxygen register their element classes through Element Studio; missing plugins or lazily unloaded classes cannot be inspected until WordPress/Oxygen loads them.',
             ],
             'essentialElements' => $essential,
+            'breakdanceElementsForOxygen' => $breakdanceElements,
+            'breakdanceFormsForOxygen' => $breakdanceForms,
             'oxygenElements' => $oxygen,
         ];
     }
@@ -52,6 +58,18 @@ class BuilderElementCatalogService
         );
 
         return $elements;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $elements
+     * @return array<int, array<string, mixed>>
+     */
+    private function filterByCategory(array $elements, string $category): array
+    {
+        return array_values(array_filter(
+            $elements,
+            static fn (array $element): bool => (string) ($element['category'] ?? '') === $category
+        ));
     }
 
     /**

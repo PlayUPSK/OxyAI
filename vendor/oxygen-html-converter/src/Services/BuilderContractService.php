@@ -37,6 +37,17 @@ class BuilderContractService
             'columns' => ['\\EssentialElements\\Columns', []],
             'column' => ['\\EssentialElements\\Column', []],
             'icon' => ['\\EssentialElements\\Icon', []],
+            'formBuilder' => ['\\EssentialElements\\FormBuilder', [
+                'content.form.form_name',
+                'content.form.fields[].type',
+                'content.form.fields[].label',
+                'content.form.fields[].advanced.id',
+                'content.form.submit_text',
+                'content.form.success_message',
+                'content.actions.actions',
+            ]],
+            'loginForm' => ['\\EssentialElements\\LoginForm', ['content.form.submit_text', 'content.form.success_message']],
+            'registerForm' => ['\\EssentialElements\\RegisterForm', ['content.form.submit_text', 'content.form.success_message', 'content.form.redirect_url']],
         ];
 
         $statuses = [];

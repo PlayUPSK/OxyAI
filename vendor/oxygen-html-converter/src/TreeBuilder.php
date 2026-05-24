@@ -795,7 +795,11 @@ class TreeBuilder
 
             $expandedDeclarations = $this->expandShorthandProperties($rule['declarations']);
             $materializedDeclarations = $this->filterNeutralFallbackDeclarations($expandedDeclarations);
-            $convertedStyles = $this->styleExtractor->toOxygenProperties($materializedDeclarations, $elementType);
+            $convertedStyles = $this->styleExtractor->toOxygenProperties(
+                $materializedDeclarations,
+                $elementType,
+                (string) ($rule['breakpoint'] ?? 'breakpoint_base')
+            );
 
             if ($convertedStyles === []) {
                 continue;

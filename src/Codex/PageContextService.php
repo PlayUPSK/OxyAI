@@ -47,7 +47,8 @@ final class PageContextService
                 'Use convert_and_stage_page when the user wants to review/apply from the Oxygen sidebar.',
                 'Use apply_html_to_oxygen_page with dryRun=true before direct writes unless the user explicitly approved applying content.',
                 'Call list_oxygen_element_capabilities before hand-authoring Oxygen JSON; it includes supported Breakdance Elements for Oxygen contracts, auto-mapping rules, and CSS fallback policy.',
-                'For Breakdance Elements for Oxygen, only use elements whose capability entry exposes requiredContentPaths you can satisfy exactly. Keep CssCode fallback unless cssFallbackCanBeStripped is true.',
+                'For Breakdance Elements/Forms for Oxygen, only use elements whose capability entry exposes requiredContentPaths you can satisfy exactly. Keep CssCode fallback unless cssFallbackCanBeStripped is true.',
+                'For selector-only native styling, check selectorCompilerSupport first; direct single-class max-width media rules can map to Oxygen breakpoints, while flex wrapping, flex item growth/shrink, CSS grid, complex media queries, and pseudo states may need CSS fallback.',
                 'OxyAI creates restore backups for direct writes; use restore_oxygen_page_backup to undo.',
             ],
         ];
