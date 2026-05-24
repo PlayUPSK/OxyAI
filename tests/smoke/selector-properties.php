@@ -248,4 +248,26 @@ assert(($persistedByName['missing-id-card']['id'] ?? '') === $missingIdCard['id'
 assert(($persistedByName['missing-id-card']['type'] ?? '') === 'class');
 assert(!str_starts_with((string) ($persistedByName['missing-id-card']['name'] ?? ''), '.'));
 
+$oxyaiSelectorPropertiesOptions = [
+    'oxy_selectors_json_string' => [
+        [
+            'id' => 'empty-properties-id',
+            'name' => 'empty-properties',
+            'type' => 'class',
+            'properties' => [],
+            'children' => [],
+            'collection' => 'OxyAI',
+        ],
+    ],
+];
+
+$repairResult = $service->repairPersistedSelectors();
+assert($repairResult['selectorsChanged'] === 1);
+assert($repairResult['propertiesObjectsRepaired'] === 1);
+
+$repairedSelectors = json_decode((string) ($oxyaiSelectorPropertiesOptions['oxy_selectors_json_string'] ?? ''), true);
+assert(is_array($repairedSelectors));
+assert(str_contains((string) ($oxyaiSelectorPropertiesOptions['oxy_selectors_json_string'] ?? ''), '"properties":{}'));
+assert(($repairedSelectors[0]['locked'] ?? null) === false);
+
 echo "selector-properties-ok\n";
