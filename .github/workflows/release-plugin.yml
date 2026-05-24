@@ -83,7 +83,15 @@ jobs:
           ZIP: ${{ steps.version.outputs.zip }}
         shell: bash
         run: |
+          cat > release-notes.md <<EOF
+          Installable WordPress plugin package for OxyAI Oxygen $VERSION.
+
+          ## Installation
+
+          Download \`$ZIP\`, unzip it into \`wp-content/plugins\`, and activate OxyAI Oxygen in WordPress.
+          EOF
+
           gh release create "$TAG" "release/$ZIP" \
             --target "$GITHUB_SHA" \
             --title "OxyAI Oxygen $VERSION" \
-            --notes "Installable WordPress plugin package for OxyAI Oxygen $VERSION. Download $ZIP, unzip it into wp-content/plugins, and activate OxyAI Oxygen in WordPress."
+            --notes-file release-notes.md
