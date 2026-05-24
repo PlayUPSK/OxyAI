@@ -14,6 +14,7 @@ use OxyAI\Oxygen\Ai\PlanModeService;
 use OxyAI\Oxygen\Ai\TripleShotService;
 use OxyAI\Oxygen\Inspirations\SiteInspirationStore;
 use OxyAI\Oxygen\Oxygen\OxygenPageMutationService;
+use OxyAI\Oxygen\Oxygen\SelectorRegistrationService;
 use OxyAI\Oxygen\Presets\PresetStore;
 use OxyAI\Oxygen\Security\CapabilityService;
 use OxyAI\Oxygen\Source\SourceBundle;
@@ -255,6 +256,7 @@ final class McpController
             'recompile_oxygen_css' => $this->pageMutations->recompileCss(
                 (int) ($input['postId'] ?? $input['id'] ?? 0)
             ),
+            'repair_oxygen_selectors' => (new SelectorRegistrationService())->repairPersistedSelectors(),
             'list_design_presets' => ['success' => true, 'presets' => $this->presets->all()],
             'list_site_inspirations' => ['success' => true, 'siteInspirations' => $this->inspirations->all()],
             'list_oxygen_element_capabilities' => $this->elementCapabilities->all(
@@ -334,6 +336,7 @@ final class McpController
             $this->tool('recompile_oxygen_css', 'Force Oxygen to regenerate the compiled stylesheet for a page. Removes the on-disk post-{id}.css file, busts every known cache meta, and invokes available Breakdance rebuild functions. Call after apply_* operations when the page renders unstyled despite a successful write.', [
                 'postId' => ['type' => 'integer'],
             ], ['postId']),
+            $this->tool('repair_oxygen_selectors', 'Repair persisted Oxygen selector records created by older OxyAI versions. Use when Oxygen editor reports IO-TS decoding failures for oxySelectors, missing locked fields, polluted .breakdance class names, array properties, or string font_weight values.', []),
             $this->tool('convert_html_to_oxygen', 'Convert HTML/CSS/JS into builder-safe Oxygen payload JSON.', [
                 'html' => ['type' => 'string'],
                 'css' => ['type' => 'string'],

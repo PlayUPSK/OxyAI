@@ -152,6 +152,81 @@ final class SelectorRegistrationService
     }
 
     /**
+     * Repair previously persisted OxyAI selector records that may have been
+     * written before the selector schema normalizer existed.
+     *
+     * @return array<string, mixed>
+     */
+    public function repairPersistedSelectors(): array
+    {
+        $existing = $this->readOxySelectors();
+        $repaired = [];
+        $changed = 0;
+        $fontWeightsRepaired = 0;
+        $lockedAdded = 0;
+        $propertiesObjectsRepaired = 0;
+        $classNamesRepaired = 0;
+
+        foreach ($existing as $selector) {
+            $before = $this->selectorRepairSignature($selector);
+            $hadLocked = array_key_exists('locked', $selector);
+            $hadEmptyPropertiesArray = isset($selector['properties']) && $selector['properties'] === [];
+            $beforeName = $selector['name'] ?? null;
+            $beforeType = $selector['type'] ?? null;
+
+            $selector = $this->normalizeSelectorShape($selector);
+            if (isset($selector['properties']) && is_array($selector['properties'])) {
+                $this->normalizeSelectorPropertyValues($selector['properties'], $fontWeightsRepaired);
+            }
+
+            if (!$hadLocked && array_key_exists('locked', $selector)) {
+                $lockedAdded++;
+            }
+
+            if ($hadEmptyPropertiesArray && $selector['properties'] instanceof \stdClass) {
+                $propertiesObjectsRepaired++;
+            }
+
+            if (($selector['name'] ?? null) !== $beforeName || ($selector['type'] ?? null) !== $beforeType) {
+                $classNamesRepaired++;
+            }
+
+            if ($this->selectorRepairSignature($selector) !== $before) {
+                $changed++;
+            }
+
+            $repaired[] = $selector;
+        }
+
+        if ($changed > 0) {
+            $this->persistAllSelectors($repaired);
+        }
+
+        return [
+            'success' => true,
+            'selectorsScanned' => count($existing),
+            'selectorsChanged' => $changed,
+            'lockedAdded' => $lockedAdded,
+            'propertiesObjectsRepaired' => $propertiesObjectsRepaired,
+            'classNamesRepaired' => $classNamesRepaired,
+            'fontWeightsRepaired' => $fontWeightsRepaired,
+            'registryOption' => self::SELECTORS_OPTION,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $selector
+     */
+    private function selectorRepairSignature(array $selector): string
+    {
+        if (($selector['properties'] ?? null) instanceof \stdClass) {
+            $selector['properties'] = [];
+        }
+
+        return (string) wp_json_encode($selector);
+    }
+
+    /**
      * @param mixed $node
      * @param array<string, true> $classes
      */
@@ -333,6 +408,54 @@ final class SelectorRegistrationService
         }
 
         return $selector;
+    }
+
+    /**
+     * @param array<string, mixed> $properties
+     */
+    private function normalizeSelectorPropertyValues(array &$properties, int &$fontWeightsRepaired): void
+    {
+        foreach ($properties as $key => &$value) {
+            if ($key === 'font_weight' && is_string($value) && preg_match('/^\d+$/', $value) === 1) {
+                $value = (int) $value;
+                $fontWeightsRepaired++;
+                continue;
+            }
+
+            if (is_array($value)) {
+                $this->normalizeSelectorPropertyValues($value, $fontWeightsRepaired);
+            }
+        }
+        unset($value);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $selectors
+     */
+    private function persistAllSelectors(array $selectors): void
+    {
+        $collections = $this->readOxySelectorCollections();
+        if (!in_array(self::COLLECTION_NAME, $collections, true)) {
+            $collections[] = self::COLLECTION_NAME;
+        }
+
+        if (is_callable('\\Breakdance\\BreakdanceOxygen\\Selectors\\saveSelectors')) {
+            $payload = wp_json_encode([
+                'selectors' => $selectors,
+                'collections' => array_values($collections),
+            ]);
+            if (is_string($payload)) {
+                call_user_func('\\Breakdance\\BreakdanceOxygen\\Selectors\\saveSelectors', $payload);
+                return;
+            }
+        }
+
+        $this->setGlobalOption(self::SELECTORS_OPTION, $selectors, true);
+        $this->setGlobalOption(self::COLLECTIONS_OPTION, array_values($collections), true);
+
+        if (is_callable('\\Breakdance\\Render\\generateCacheForGlobalSettings')) {
+            call_user_func('\\Breakdance\\Render\\generateCacheForGlobalSettings');
+        }
     }
 
     /**
