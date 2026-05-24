@@ -211,7 +211,7 @@ final class McpController
         }
 
         if ($method === 'notifications/initialized') {
-            return $this->ok(null, 202);
+            return $this->ok($this->jsonRpcResult(null, new \stdClass()), 202);
         }
 
         return $this->ok($this->jsonRpcError($id, -32601, 'Method not found.'));

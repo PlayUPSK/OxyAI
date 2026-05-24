@@ -2,7 +2,7 @@
 /**
  * Plugin Name: OxyAI Oxygen
  * Description: AI-assisted HTML, CSS, and JavaScript to native Oxygen 6 builder elements.
- * Version: 0.3.2
+ * Version: 0.3.3
  * Author: Denis Uhrík
  * License: GPL v3 or later
  * License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 $oxyaiOxygenExpectedConstants = [
-    'OXYAI_OXYGEN_VERSION' => '0.3.2',
+    'OXYAI_OXYGEN_VERSION' => '0.3.3',
     'OXYAI_OXYGEN_PATH' => plugin_dir_path(__FILE__),
     'OXYAI_OXYGEN_URL' => plugin_dir_url(__FILE__),
     'OXYAI_OXYGEN_OPTION' => 'oxyai_oxygen_settings',
