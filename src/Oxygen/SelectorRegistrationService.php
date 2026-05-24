@@ -191,7 +191,12 @@ final class SelectorRegistrationService
                 $classNamesRepaired++;
             }
 
-            if ($this->selectorRepairSignature($selector) !== $before) {
+            if (!$hadLocked
+                || $hadEmptyPropertiesArray
+                || ($selector['name'] ?? null) !== $beforeName
+                || ($selector['type'] ?? null) !== $beforeType
+                || $this->selectorRepairSignature($selector) !== $before
+            ) {
                 $changed++;
             }
 
