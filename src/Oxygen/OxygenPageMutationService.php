@@ -56,6 +56,13 @@ final class OxygenPageMutationService
             );
         }
 
+        // Self-heal element type names whose namespace separator was lost in
+        // transport (e.g. a client/proxy collapsing "\\" so that
+        // "OxygenElements\\Container" arrives as "OxygenElementsContainer").
+        // Such a type resolves to no registered element and renders as
+        // "this element is missing", so repair it before it reaches the page.
+        $typeRepairs = $this->repairCorruptedTypes($incomingTree);
+
         $operation = $this->normalizeOperation((string) ($options['operation'] ?? $options['mode'] ?? 'append'));
         $targetNodeId = isset($options['targetNodeId']) && is_numeric($options['targetNodeId'])
             ? (int) $options['targetNodeId']
@@ -92,6 +99,24 @@ final class OxygenPageMutationService
 
         if ($selectorRegistration !== null) {
             $result['selectorRegistration'] = $selectorRegistration;
+        }
+
+        if ($typeRepairs !== []) {
+            $result['elementTypeRepairs'] = $typeRepairs;
+            $result['mcpWarnings'] = [[
+                'code' => 'element_type_namespace_repaired',
+                'severity' => 'warning',
+                'message' => sprintf(
+                    /* translators: %d: number of element type names that were repaired. */
+                    _n(
+                        'Repaired %d element type name missing its namespace separator (e.g. "OxygenElementsContainer" was corrected to "OxygenElements\\Container"). The separator was likely dropped in transport; the corrected tree was applied.',
+                        'Repaired %d element type names missing their namespace separators (e.g. "OxygenElementsContainer" was corrected to "OxygenElements\\Container"). The separators were likely dropped in transport; the corrected tree was applied.',
+                        count($typeRepairs),
+                        'oxyai-oxygen'
+                    ),
+                    count($typeRepairs)
+                ),
+            ]];
         }
 
         if ($dryRun) {
@@ -719,6 +744,65 @@ final class OxygenPageMutationService
         }
 
         return (bool) preg_match('/^[A-Z][A-Za-z0-9_]*Elements[A-Z][A-Za-z0-9_]*$/', $type);
+    }
+
+    /**
+     * Re-insert the namespace separator into element type names that lost it
+     * in transport, mutating the tree in place.
+     *
+     * @param array<string, mixed> $tree
+     * @return array<int, array{from: string, to: string}>
+     */
+    private function repairCorruptedTypes(array &$tree): array
+    {
+        $repairs = [];
+        if (isset($tree['root']) && is_array($tree['root'])) {
+            $this->repairTypesInNode($tree['root'], $repairs);
+        } else {
+            $this->repairTypesInNode($tree, $repairs);
+        }
+
+        return $repairs;
+    }
+
+    /**
+     * @param array<string, mixed> $node
+     * @param array<int, array{from: string, to: string}> $repairs
+     */
+    private function repairTypesInNode(array &$node, array &$repairs): void
+    {
+        $type = $node['data']['type'] ?? null;
+        if (is_string($type) && $type !== '') {
+            $repaired = $this->repairTypeName($type);
+            if ($repaired !== null && $repaired !== $type) {
+                $node['data']['type'] = $repaired;
+                $repairs[] = ['from' => $type, 'to' => $repaired];
+            }
+        }
+
+        if (isset($node['children']) && is_array($node['children'])) {
+            foreach ($node['children'] as &$child) {
+                if (is_array($child)) {
+                    $this->repairTypesInNode($child, $repairs);
+                }
+            }
+            unset($child);
+        }
+    }
+
+    /**
+     * Return the repaired type name (namespace separator restored), or null
+     * when the value is not a recognisable separator-stripped element type.
+     */
+    private function repairTypeName(string $type): ?string
+    {
+        if (!$this->isCorruptedTypeName($type)) {
+            return null;
+        }
+
+        $repaired = preg_replace('/^([A-Z][A-Za-z0-9_]*Elements)([A-Z][A-Za-z0-9_]*)$/', '$1\\\\$2', $type);
+
+        return is_string($repaired) && str_contains($repaired, '\\') ? $repaired : null;
     }
 
     /**
