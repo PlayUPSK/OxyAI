@@ -2,7 +2,7 @@
 /**
  * Plugin Name: OxyAI Oxygen
  * Description: AI-assisted HTML, CSS, and JavaScript to native Oxygen 6 builder elements.
- * Version: 0.4.1
+ * Version: 0.4.2
  * Author: Denis Uhrík
  * License: GPL v3 or later
  * License URI: https://www.gnu.org/licenses/gpl-3.0.html
