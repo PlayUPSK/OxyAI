@@ -468,7 +468,14 @@ final class SelectorRegistrationService
      */
     private function sanitizePropertiesForIoTs(array &$properties, array &$counters): void
     {
-        static $sizeKeys = ['width', 'min_width', 'max_width', 'height', 'min_height', 'max_height'];
+        // `width`/`height` accept a keyword union (`auto`, `inherit`, ...) in the
+        // schema, so a recognised keyword string is preserved. `min_width`,
+        // `max_width`, `min_height` and `max_height` accept only a structured
+        // `{number, unit, style}` object or `null` — every bare string there
+        // (including keywords like `none`) is a hard IO-TS decode failure and
+        // must be stripped.
+        static $sizeKeywordKeys = ['width', 'height'];
+        static $sizeStrictKeys = ['min_width', 'max_width', 'min_height', 'max_height'];
         static $sizeKeywords = ['auto', 'fit', 'none', 'inherit', 'initial', 'unset'];
         static $effectsKeys = ['transition', 'transform', 'box_shadow', 'filter', 'backdrop_filter'];
         static $typographyKeys = ['font_size', 'line_height', 'letter_spacing'];
@@ -478,7 +485,13 @@ final class SelectorRegistrationService
             $value = $properties[$key];
 
             if (is_string($value)) {
-                if (in_array($key, $sizeKeys, true)
+                if (in_array($key, $sizeStrictKeys, true)) {
+                    unset($properties[$key]);
+                    $counters['sizeStringsRemoved']++;
+                    continue;
+                }
+
+                if (in_array($key, $sizeKeywordKeys, true)
                     && !in_array(strtolower($value), $sizeKeywords, true)
                 ) {
                     unset($properties[$key]);
