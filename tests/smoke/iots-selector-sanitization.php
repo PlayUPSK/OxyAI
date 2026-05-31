@@ -224,6 +224,40 @@ assert($keepRepaired[0]['properties']['breakpoint_base']['size']['height'] === '
 assert($keepRepaired[0]['properties']['breakpoint_base']['typography']['line_height'] === 'initial');
 assert($keepRepaired[0]['properties']['breakpoint_base']['typography']['letter_spacing'] === 'unset');
 
+// Strict min/max size keys reject bare strings entirely. Even schema keywords
+// like `none`/`auto` are invalid for `max_width`/`min_height` (Oxygen's IO-TS
+// schema only accepts `{number, unit, style}` or null there), so they must be
+// stripped — while a keyworded `width` in the same selector still survives.
+// Mirrors the live failure: breakpoint_tablet_portrait.size.max_width = "none".
+$oxyaiIoTsSanitizationOptions = [
+    'oxy_selectors_json_string' => [
+        [
+            'id' => 'minmax-id',
+            'name' => 'mk-minmax-strip',
+            'type' => 'class',
+            'properties' => [
+                'breakpoint_tablet_portrait' => [
+                    'size' => [
+                        'max_width' => 'none',
+                        'min_height' => 'auto',
+                        'width' => 'auto',
+                    ],
+                ],
+            ],
+            'children' => [],
+            'collection' => 'OxyAI',
+            'locked' => false,
+        ],
+    ],
+];
+
+$strictResult = $service->repairPersistedSelectors();
+assert($strictResult['sizeStringsRemoved'] === 2); // max_width:none, min_height:auto
+$strictRepaired = $readPersisted();
+assert(!isset($strictRepaired[0]['properties']['breakpoint_tablet_portrait']['size']['max_width']));
+assert(!isset($strictRepaired[0]['properties']['breakpoint_tablet_portrait']['size']['min_height']));
+assert($strictRepaired[0]['properties']['breakpoint_tablet_portrait']['size']['width'] === 'auto');
+
 // Idempotent: re-running repair on already-clean data is a no-op.
 $secondPass = $service->repairPersistedSelectors();
 assert($secondPass['sizeStringsRemoved'] === 0);
