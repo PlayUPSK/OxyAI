@@ -98,6 +98,19 @@ Then activate **OxyAI Oxygen** in WordPress and open **Tools → OxyAI Oxygen**.
 
 > The converter kernel is vendored under `vendor/oxygen-html-converter/` — no separate plugin install is required.
 
+### Updates
+
+Once a release is installed, the plugin updates itself from this repo's GitHub
+releases — no wordpress.org listing required. It checks the latest release every
+~6 hours, shows the update on **Plugins → Installed Plugins** (with the standard
+"enable auto-updates" toggle), and serves release notes in the **View details**
+modal.
+
+Background auto-updates are **on by default**. To control this:
+
+- Disable entirely: define `OXYAI_OXYGEN_DISABLE_AUTO_UPDATES` as `true` in `wp-config.php`, or `add_filter('oxyai_oxygen_enable_auto_updates', '__return_false')`.
+- Private repo / rate limits: provide a token via `OXYAI_OXYGEN_GITHUB_TOKEN` or the `oxyai_oxygen_github_token` filter (not needed for the public repo).
+
 ---
 
 ## Quick Start
