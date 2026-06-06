@@ -47,9 +47,21 @@ final class McpController
     {
         add_action('rest_api_init', function (): void {
             register_rest_route('oxyai/v1', '/mcp', [
-                'methods' => 'POST',
-                'permission_callback' => fn (WP_REST_Request $request): bool => $this->capabilities->canUseMcp($request),
-                'callback' => fn (WP_REST_Request $request) => $this->handle($request),
+                [
+                    'methods' => 'POST',
+                    'permission_callback' => fn (WP_REST_Request $request): bool => $this->capabilities->canUseMcp($request),
+                    'callback' => fn (WP_REST_Request $request) => $this->handle($request),
+                ],
+                [
+                    // Streamable HTTP transport: clients may probe GET (server->client
+                    // SSE) or DELETE (end session). This server is stateless and does
+                    // not offer a server-initiated stream, so answer with a spec-correct
+                    // 405 + Allow header instead of WordPress' default 404, which some
+                    // MCP clients treat as a fatal transport error.
+                    'methods' => 'GET, DELETE',
+                    'permission_callback' => fn (WP_REST_Request $request): bool => $this->capabilities->canUseMcp($request),
+                    'callback' => fn (WP_REST_Request $request) => $this->handleUnsupportedTransportMethod(),
+                ],
             ]);
         });
     }
@@ -160,8 +172,8 @@ final class McpController
         $params = is_array($request['params'] ?? null) ? $request['params'] : [];
 
         if ($method === 'initialize') {
-            return $this->ok($this->jsonRpcResult($id, [
-                'protocolVersion' => '2024-11-05',
+            $response = $this->ok($this->jsonRpcResult($id, [
+                'protocolVersion' => $this->negotiateProtocolVersion($params['protocolVersion'] ?? null),
                 'serverInfo' => [
                     'name' => 'oxyai-oxygen',
                     'version' => OXYAI_OXYGEN_VERSION,
@@ -170,6 +182,13 @@ final class McpController
                     'tools' => new \stdClass(),
                 ],
             ]));
+
+            // Advertise a session id for Streamable HTTP clients. The server is
+            // stateless and does not require the id back, but supplying it lets
+            // clients that expect the header complete their handshake.
+            $response->header('Mcp-Session-Id', wp_generate_uuid4());
+
+            return $response;
         }
 
         if ($method === 'tools/list') {
@@ -223,7 +242,7 @@ final class McpController
      */
     private function shouldBlockUnsafeEncodedApply(string $tool, array $input, array $encodingWarnings): bool
     {
-        if ($encodingWarnings === [] || !in_array($tool, ['apply_html_to_oxygen_page', 'apply_oxygen_json_to_page'], true)) {
+        if ($encodingWarnings === [] || !in_array($tool, ['apply_html_to_oxygen_page', 'apply_oxygen_json_to_page', 'apply_oxygen_operations', 'upsert_css_block'], true)) {
             return false;
         }
 
@@ -242,9 +261,23 @@ final class McpController
             'get_page_context' => $this->pages->getContext((int) ($input['postId'] ?? $input['id'] ?? 0)),
             'stage_page_payload' => $this->pages->stagePayload((int) ($input['postId'] ?? $input['id'] ?? 0), $input),
             'convert_and_stage_page' => $this->convertAndStagePage($input),
-            'get_oxygen_tree' => $this->pageMutations->getTree((int) ($input['postId'] ?? $input['id'] ?? 0)),
+            'get_oxygen_tree' => $this->pageMutations->getTree((int) ($input['postId'] ?? $input['id'] ?? 0), $this->treeViewOptions($input)),
+            'find_oxygen_nodes' => $this->pageMutations->findNodes((int) ($input['postId'] ?? $input['id'] ?? 0), $this->nodeFilter($input)),
             'apply_html_to_oxygen_page' => $this->applyHtmlToPage($input),
             'apply_oxygen_json_to_page' => $this->applyOxygenJsonToPage($input),
+            'apply_oxygen_operations' => $this->applyOxygenOperations($input),
+            'upsert_css_block' => $this->pageMutations->upsertCssBlock(
+                (int) ($input['postId'] ?? $input['id'] ?? 0),
+                (string) ($input['css'] ?? ''),
+                (string) ($input['key'] ?? ''),
+                $this->writeOptions($input)
+            ),
+            'remove_css_block' => $this->pageMutations->removeCssBlock(
+                (int) ($input['postId'] ?? $input['id'] ?? 0),
+                (string) ($input['key'] ?? ''),
+                $this->writeOptions($input)
+            ),
+            'list_css_blocks' => $this->pageMutations->listCssBlocks((int) ($input['postId'] ?? $input['id'] ?? 0)),
             'list_oxygen_page_backups' => [
                 'success' => true,
                 'backups' => $this->pageMutations->listBackups((int) ($input['postId'] ?? $input['id'] ?? 0)),
@@ -303,8 +336,19 @@ final class McpController
                 'notes' => ['type' => 'string'],
                 'options' => ['type' => 'object'],
             ], ['postId', 'html']),
-            $this->tool('get_oxygen_tree', 'Read the persisted Oxygen page tree, node count, next node id, and available OxyAI restore backups.', [
+            $this->tool('get_oxygen_tree', 'Read the persisted Oxygen page tree. Returns a compact OUTLINE by default ({id,type,label,parentId,childIds,classes}) with design data and inline SVG stripped - far cheaper than the full tree. Pass view:"full" for the raw tree, nodeId to focus a single subtree, depth to limit outline depth, includeBackups:true to also return backup payloads.', [
                 'postId' => ['type' => 'integer'],
+                'view' => ['type' => 'string', 'description' => 'outline (default) or full.'],
+                'nodeId' => ['type' => 'integer', 'description' => 'Focus the outline/tree on a single node and its descendants.'],
+                'depth' => ['type' => 'integer', 'description' => 'Limit outline depth from the root (or focused node).'],
+                'includeBackups' => ['type' => 'boolean', 'description' => 'Include full restore backup payloads. Defaults false (only backupCount is returned).'],
+            ], ['postId']),
+            $this->tool('find_oxygen_nodes', 'Find nodes in the persisted Oxygen tree by filter and return compact outline entries (id, type, label, parentId, childIds). Avoids fetching and scanning the whole tree.', [
+                'postId' => ['type' => 'integer'],
+                'type' => ['type' => 'string', 'description' => 'Case-insensitive substring match against the full element type, e.g. "MenuCustomArea" or "TextLink".'],
+                'textContains' => ['type' => 'string', 'description' => 'Match nodes whose text/url/icon label contains this string.'],
+                'class' => ['type' => 'string', 'description' => 'Match nodes carrying this CSS class or selector ref.'],
+                'hasLink' => ['type' => 'boolean', 'description' => 'Match nodes that do (true) or do not (false) have a content link url.'],
             ], ['postId']),
             $this->tool('apply_html_to_oxygen_page', 'WRITES TO THE LIVE PAGE - always call once with dryRun:true first to inspect the proposed tree unless the user has explicitly approved the content. Directly converts HTML/CSS/JS and applies it to a WordPress Oxygen page. A restore backup is created when dryRun is false, but treat direct writes as hard to reverse: verify the page renders after applying. Use append for new sections; replace_node for a selected element; replace only when overwriting the whole page is intended.', [
                 'postId' => ['type' => 'integer'],
@@ -313,18 +357,46 @@ final class McpController
                 'js' => ['type' => 'string'],
                 'operation' => ['type' => 'string', 'description' => 'append, replace, or replace_node. Defaults to append.'],
                 'targetNodeId' => ['type' => 'integer', 'description' => 'Required for replace_node.'],
-                'dryRun' => ['type' => 'boolean', 'description' => 'Return the proposed tree without saving.'],
+                'dryRun' => ['type' => 'boolean', 'description' => 'Return the proposed change without saving.'],
+                'dryRunView' => ['type' => 'string', 'description' => 'On dryRun: "full" (default) also returns the whole proposed tree; "outline" returns only the compact outline + changedNodeIds (token-efficient).'],
+                'recompile' => ['type' => 'boolean', 'description' => 'After a live write, force a full CSS recompile (saves a separate recompile_oxygen_css call).'],
                 'registerSelectors' => ['type' => 'boolean', 'description' => 'Register and attach semantic classes as Oxygen selector IDs. Defaults true.'],
                 'options' => ['type' => 'object'],
             ], ['postId', 'html']),
-            $this->tool('apply_oxygen_json_to_page', 'WRITES TO THE LIVE PAGE - always call once with dryRun:true first unless the user has explicitly approved the content. Directly applies a converted Oxygen rawJson/documentTree/element payload to a page. A restore backup is created when dryRun is false, but treat direct writes as hard to reverse: verify the page renders after applying. For replace_node, pass either a documentTree wrapper or a single node object with id, data, and children.', [
+            $this->tool('apply_oxygen_json_to_page', 'WRITES TO THE LIVE PAGE - always call once with dryRun:true first unless the user has explicitly approved the content. Directly applies a converted Oxygen rawJson/documentTree/element payload to a page. A restore backup is created when dryRun is false, but treat direct writes as hard to reverse: verify the page renders after applying. For replace_node, pass either a documentTree wrapper or a single node object with id, data, and children. The response includes idMap (incoming id -> assigned id) and changedNodeIds so you can target follow-up edits.', [
                 'postId' => ['type' => 'integer'],
                 'rawJson' => ['type' => 'string'],
                 'oxygen' => ['type' => 'object'],
                 'operation' => ['type' => 'string', 'description' => 'append, replace, or replace_node. Defaults to append.'],
                 'targetNodeId' => ['type' => 'integer'],
                 'dryRun' => ['type' => 'boolean'],
+                'dryRunView' => ['type' => 'string', 'description' => 'On dryRun: "full" (default) also returns the whole proposed tree; "outline" returns only the compact outline + changedNodeIds.'],
+                'preserveIds' => ['type' => 'boolean', 'description' => 'Keep the incoming node ids instead of renumbering, when they are unique and do not collide with the existing tree. Defaults false (renumber). replace_node always forces the root to targetNodeId.'],
+                'recompile' => ['type' => 'boolean', 'description' => 'After a live write, force a full CSS recompile.'],
                 'registerSelectors' => ['type' => 'boolean', 'description' => 'Register and attach semantic classes as Oxygen selector IDs. Defaults true.'],
+            ], ['postId']),
+            $this->tool('apply_oxygen_operations', 'WRITES TO THE LIVE PAGE (unless dryRun) - apply a sequence of small node operations to the existing tree in ONE call and ONE backup. Far cheaper than resending whole subtrees. Each op is a map: {op:"update_node",targetNodeId,set:{"data.properties.content.content.text":"..."},unset:["data.properties..."]}; {op:"set_node_type",targetNodeId,type,set?,unset?}; {op:"delete_node",targetNodeId}; {op:"move_node",nodeId,toParent,index?}; {op:"insert_node",parentId,node,index?}; {op:"upsert_css",key,css}; {op:"remove_css",key}. set/unset use dot-paths into the node. Returns idMap + changedNodeIds; dryRun returns the outline.', [
+                'postId' => ['type' => 'integer'],
+                'ops' => ['type' => 'array', 'description' => 'Ordered list of node operations (see tool description).'],
+                'dryRun' => ['type' => 'boolean', 'description' => 'Return the proposed outline + changedNodeIds without saving.'],
+                'dryRunView' => ['type' => 'string', 'description' => 'On dryRun: "outline" (default) or "full" to also return the whole proposed tree.'],
+                'recompile' => ['type' => 'boolean', 'description' => 'After a live write, force a full CSS recompile.'],
+            ], ['postId', 'ops']),
+            $this->tool('upsert_css_block', 'WRITES TO THE LIVE PAGE (unless dryRun) - create or replace a keyed CssCode block on the page. Idempotent: re-running with the same key updates the existing block instead of stacking new nodes. Use for custom CSS overrides scoped by id-independent selectors. Pair with remove_css_block to revert.', [
+                'postId' => ['type' => 'integer'],
+                'key' => ['type' => 'string', 'description' => 'Stable identifier for this block ([A-Za-z0-9_-], max 64). Re-using it replaces the previous block.'],
+                'css' => ['type' => 'string', 'description' => 'Raw CSS. Stored verbatim under a keyed marker comment.'],
+                'dryRun' => ['type' => 'boolean'],
+                'recompile' => ['type' => 'boolean', 'description' => 'After a live write, force a full CSS recompile.'],
+            ], ['postId', 'key', 'css']),
+            $this->tool('remove_css_block', 'WRITES TO THE LIVE PAGE (unless dryRun) - remove a keyed CssCode block previously created with upsert_css_block.', [
+                'postId' => ['type' => 'integer'],
+                'key' => ['type' => 'string'],
+                'dryRun' => ['type' => 'boolean'],
+                'recompile' => ['type' => 'boolean'],
+            ], ['postId', 'key']),
+            $this->tool('list_css_blocks', 'List keyed CssCode blocks on a page (key, nodeId, length).', [
+                'postId' => ['type' => 'integer'],
             ], ['postId']),
             $this->tool('list_oxygen_page_backups', 'List recent OxyAI restore backups for a page.', [
                 'postId' => ['type' => 'integer'],
@@ -442,6 +514,35 @@ final class McpController
     }
 
     /**
+     * Echo the client's requested protocol version when we recognise it, else
+     * fall back to the baseline. Keeps newer Streamable HTTP clients happy
+     * without dropping older ones.
+     *
+     * @param mixed $requested
+     */
+    private function negotiateProtocolVersion($requested): string
+    {
+        $supported = ['2025-06-18', '2025-03-26', '2024-11-05'];
+        return is_string($requested) && in_array($requested, $supported, true)
+            ? $requested
+            : '2024-11-05';
+    }
+
+    private function handleUnsupportedTransportMethod(): WP_REST_Response
+    {
+        $response = $this->ok([
+            'jsonrpc' => '2.0',
+            'error' => [
+                'code' => -32601,
+                'message' => 'This MCP endpoint only supports POST. It does not offer a server-initiated SSE stream or session deletion.',
+            ],
+        ], 405);
+        $response->header('Allow', 'POST');
+
+        return $response;
+    }
+
+    /**
      * @param array<string, mixed> $input
      */
     private function replaceSelectedSubtree(array $input)
@@ -552,6 +653,82 @@ final class McpController
         $oxygen = is_array($input['oxygen'] ?? null) ? $input['oxygen'] : $input;
 
         return $this->pageMutations->applyOxygen($postId, $oxygen, $input);
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    private function applyOxygenOperations(array $input)
+    {
+        $postId = (int) ($input['postId'] ?? $input['id'] ?? 0);
+        $ops = is_array($input['ops'] ?? null) ? $input['ops'] : (is_array($input['operations'] ?? null) ? $input['operations'] : []);
+
+        return $this->pageMutations->applyOperations($postId, $ops, $this->writeOptions($input));
+    }
+
+    /**
+     * Options for read/outline tools.
+     *
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    private function treeViewOptions(array $input): array
+    {
+        $options = [];
+        if (isset($input['view']) && is_string($input['view'])) {
+            $options['view'] = $input['view'];
+        }
+        if (isset($input['nodeId']) && is_numeric($input['nodeId'])) {
+            $options['nodeId'] = (int) $input['nodeId'];
+        }
+        if (isset($input['depth']) && is_numeric($input['depth'])) {
+            $options['depth'] = (int) $input['depth'];
+        }
+        if (array_key_exists('includeBackups', $input)) {
+            $options['includeBackups'] = filter_var($input['includeBackups'], FILTER_VALIDATE_BOOLEAN);
+        }
+
+        return $options;
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    private function nodeFilter(array $input): array
+    {
+        $filter = [];
+        foreach (['type', 'textContains', 'class'] as $key) {
+            if (isset($input[$key]) && is_string($input[$key])) {
+                $filter[$key] = $input[$key];
+            }
+        }
+        if (array_key_exists('hasLink', $input)) {
+            $filter['hasLink'] = filter_var($input['hasLink'], FILTER_VALIDATE_BOOLEAN);
+        }
+
+        return $filter;
+    }
+
+    /**
+     * Common write-path options (dryRun, recompile) forwarded to the mutation service.
+     *
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    private function writeOptions(array $input): array
+    {
+        $options = [];
+        foreach (['dryRun', 'recompile', 'preserveIds'] as $flag) {
+            if (array_key_exists($flag, $input)) {
+                $options[$flag] = filter_var($input[$flag], FILTER_VALIDATE_BOOLEAN);
+            }
+        }
+        if (isset($input['dryRunView']) && is_string($input['dryRunView'])) {
+            $options['dryRunView'] = $input['dryRunView'];
+        }
+
+        return $options;
     }
 
     /**

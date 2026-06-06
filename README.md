@@ -58,9 +58,10 @@ OxyAI Oxygen is a single WordPress plugin that turns raw HTML/CSS/JS — or a na
 - Built-in and saved **design presets**.
 
 ### Remote Tooling (MCP)
-- One REST endpoint speaking MCP-style initialize / list / call.
-- Page picker + context tools: `list_oxygen_pages`, `get_page_context`, `get_oxygen_tree`.
-- Staged handoff (`convert_and_stage_page`) and direct write (`apply_html_to_oxygen_page`) with `dryRun` and automatic restore backups.
+- One REST endpoint speaking MCP-style initialize / list / call over Streamable HTTP (protocol-version negotiation, `Mcp-Session-Id`, GET/DELETE → 405).
+- Page picker + context tools: `list_oxygen_pages`, `get_page_context`, `get_oxygen_tree` (token-efficient outline), `find_oxygen_nodes`.
+- Token-efficient editing: `apply_oxygen_operations` batch node ops, idempotent `upsert_css_block`, `idMap`/`changedNodeIds` on writes, `dryRunView` outlines.
+- Staged handoff (`convert_and_stage_page`) and direct write (`apply_html_to_oxygen_page`) with `dryRun`, `recompile`, and automatic restore backups.
 - Auto-generated MCP token, regenerable from the setup panel.
 
 ---
@@ -212,9 +213,13 @@ Do not put the MCP token in the URL. Query-string tokens are disabled by default
 | `triple_shot_generation`        | Three alternate source-bundle directions.                 |
 | `list_oxygen_pages`             | Enumerate Oxygen-enabled posts.                           |
 | `get_page_context`              | Summarized state of a target page.                        |
-| `get_oxygen_tree`               | Raw Oxygen tree for a post.                               |
+| `get_oxygen_tree`               | Oxygen tree for a post. Compact **outline** by default (`view:"full"`, `nodeId`, `depth`, `includeBackups`). |
+| `find_oxygen_nodes`             | Find nodes by `type` / `textContains` / `class` / `hasLink`; returns outline entries. |
 | `convert_and_stage_page`        | Stage a converted payload for builder review.             |
-| `apply_html_to_oxygen_page`     | Write directly to a page (`append` / `replace` / `replace_node`); supports `dryRun`. |
+| `apply_html_to_oxygen_page`     | Write directly to a page (`append` / `replace` / `replace_node`); supports `dryRun`, `dryRunView`, `recompile`. |
+| `apply_oxygen_json_to_page`     | Apply Oxygen JSON; returns `idMap` + `changedNodeIds`; supports `preserveIds`, `dryRunView`, `recompile`. |
+| `apply_oxygen_operations`       | Batch node ops (`update_node`/`set_node_type`/`delete_node`/`move_node`/`insert_node`/`upsert_css`/`remove_css`) in one call + one backup. |
+| `upsert_css_block` / `remove_css_block` / `list_css_blocks` | Idempotent keyed CssCode blocks for scoped overrides. |
 | `list_oxygen_page_backups`      | List restore backups for a post.                          |
 | `restore_oxygen_page_backup`    | Roll back a previous direct write.                        |
 | `list_presets`                  | Built-in and saved design presets.                        |
