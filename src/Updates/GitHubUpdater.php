@@ -7,20 +7,24 @@ namespace OxyAI\Oxygen\Updates;
 /**
  * Teaches WordPress to update this plugin from GitHub releases.
  *
- * The plugin is distributed as a release asset (oxyai-X.Y.Z.zip) on a public
- * GitHub repo, so no authentication is required. This class:
+ * The plugin is distributed as a release asset (oxyai-X.Y.Z.zip) on GitHub.
+ * This class:
  *   - injects an available update into the core plugin-update transient when a
  *     newer release exists (so the Plugins screen shows "update now" and the
  *     auto-update toggle),
  *   - serves the "View details" modal from the release notes,
  *   - normalises the extracted folder name on install,
- *   - opts the plugin into background auto-updates (filter/constant gated).
+ *   - preserves the site's existing auto-update choice,
+ *   - supports optional token-authenticated checks/downloads for private repos.
  *
  * Self-contained on purpose: no Composer dependency, loads via the plugin's
  * own autoloader, and is bundled by the existing release build.
  */
 final class GitHubUpdater
 {
+    private const POSITIVE_CACHE_TTL = 21600;
+    private const NEGATIVE_CACHE_TTL = 300;
+
     private string $basename;
     private string $slug;
     private string $transientKey = 'oxyai_oxygen_github_release';
@@ -53,6 +57,7 @@ final class GitHubUpdater
         add_filter('plugins_api', [$this, 'pluginInfo'], 20, 3);
         add_filter('upgrader_source_selection', [$this, 'fixSourceDir'], 10, 4);
         add_filter('auto_update_plugin', [$this, 'enableAutoUpdate'], 10, 2);
+        add_filter('http_request_args', [$this, 'authorizePackageDownloads'], 10, 2);
         add_action('upgrader_process_complete', [$this, 'clearCacheAfterUpdate'], 10, 2);
     }
 
@@ -188,8 +193,43 @@ final class GitHubUpdater
         if (defined('OXYAI_OXYGEN_DISABLE_AUTO_UPDATES') && OXYAI_OXYGEN_DISABLE_AUTO_UPDATES) {
             return false;
         }
+        if (!function_exists('apply_filters')) {
+            return $update;
+        }
 
-        return (bool) apply_filters('oxyai_oxygen_enable_auto_updates', true);
+        return (bool) apply_filters('oxyai_oxygen_enable_auto_updates', $update, $item, $this);
+    }
+
+    /**
+     * @param mixed $args
+     * @param mixed $url
+     * @return mixed
+     */
+    public function authorizePackageDownloads($args, $url)
+    {
+        if (!is_array($args) || !is_string($url) || $url === '') {
+            return $args;
+        }
+
+        $token = $this->gitHubToken();
+        if ($token === '' || !$this->isGitHubPackageUrl($url)) {
+            return $args;
+        }
+
+        $headers = $args['headers'] ?? [];
+        if (!is_array($headers)) {
+            $headers = [];
+        }
+
+        $headers['Authorization'] = 'Bearer ' . $token;
+        $headers['User-Agent'] = $headers['User-Agent'] ?? 'OxyAI-Oxygen-Updater';
+        if ($this->isGitHubApiUrl($url)) {
+            $headers['Accept'] = 'application/octet-stream';
+        }
+
+        $args['headers'] = $headers;
+
+        return $args;
     }
 
     /**
@@ -202,7 +242,8 @@ final class GitHubUpdater
             return;
         }
         $isPluginUpdate = ($hookExtra['type'] ?? '') === 'plugin' && ($hookExtra['action'] ?? '') === 'update';
-        $touchedUs = in_array($this->basename, (array) ($hookExtra['plugins'] ?? []), true);
+        $touchedUs = ($hookExtra['plugin'] ?? '') === $this->basename
+            || in_array($this->basename, (array) ($hookExtra['plugins'] ?? []), true);
         if ($isPluginUpdate && $touchedUs) {
             delete_site_transient($this->transientKey);
         }
@@ -226,7 +267,7 @@ final class GitHubUpdater
         set_site_transient(
             $this->transientKey,
             $release ?? ['__none' => true],
-            (defined('HOUR_IN_SECONDS') ? HOUR_IN_SECONDS : 3600) * 6
+            $release === null ? self::NEGATIVE_CACHE_TTL : self::POSITIVE_CACHE_TTL
         );
 
         return $release;
@@ -265,6 +306,10 @@ final class GitHubUpdater
     private function gitHubToken(): string
     {
         $token = defined('OXYAI_OXYGEN_GITHUB_TOKEN') ? (string) OXYAI_OXYGEN_GITHUB_TOKEN : '';
+        if (!function_exists('apply_filters')) {
+            return $token;
+        }
+
         return (string) apply_filters('oxyai_oxygen_github_token', $token);
     }
 
@@ -302,12 +347,16 @@ final class GitHubUpdater
      */
     public function selectPackageUrl(array $release): ?string
     {
+        $preferAuthenticatedApiUrl = $this->gitHubToken() !== '';
+
         foreach (($release['assets'] ?? []) as $asset) {
             if (!is_array($asset)) {
                 continue;
             }
             $name = (string) ($asset['name'] ?? '');
-            $url = (string) ($asset['browser_download_url'] ?? '');
+            $url = $preferAuthenticatedApiUrl
+                ? (string) ($asset['url'] ?? $asset['browser_download_url'] ?? '')
+                : (string) ($asset['browser_download_url'] ?? '');
             if ($name !== '' && $url !== '' && preg_match($this->assetPattern, $name) === 1) {
                 return $url;
             }
@@ -322,14 +371,17 @@ final class GitHubUpdater
      */
     public function buildUpdateObject(array $release, string $package): \stdClass
     {
+        $headers = $this->pluginHeaders();
+
         $item = new \stdClass();
         $item->slug = $this->slug;
         $item->plugin = $this->basename;
         $item->new_version = $this->remoteVersion($release);
         $item->url = (string) ($release['html_url'] ?? ('https://github.com/' . $this->gitHubRepo));
         $item->package = $package;
+        $item->requires = $headers['RequiresWP'];
         $item->tested = '';
-        $item->requires_php = '';
+        $item->requires_php = $headers['RequiresPHP'];
 
         return $item;
     }
@@ -341,7 +393,13 @@ final class GitHubUpdater
     {
         $defaults = ['Name' => '', 'Author' => '', 'PluginURI' => '', 'RequiresWP' => '', 'RequiresPHP' => ''];
         if (!function_exists('get_file_data')) {
-            return $defaults;
+            $pluginApi = defined('ABSPATH') ? ABSPATH . 'wp-admin/includes/plugin.php' : '';
+            if ($pluginApi !== '' && is_readable($pluginApi)) {
+                require_once $pluginApi;
+            }
+            if (!function_exists('get_file_data')) {
+                return $defaults;
+            }
         }
 
         $data = get_file_data($this->pluginFile, [
@@ -353,6 +411,30 @@ final class GitHubUpdater
         ]);
 
         return array_merge($defaults, array_map(static fn ($v): string => (string) $v, $data));
+    }
+
+    private function isGitHubApiUrl(string $url): bool
+    {
+        $parts = parse_url($url);
+        return is_array($parts) && strtolower((string) ($parts['host'] ?? '')) === 'api.github.com';
+    }
+
+    private function isGitHubPackageUrl(string $url): bool
+    {
+        $parts = parse_url($url);
+        if (!is_array($parts)) {
+            return false;
+        }
+
+        $host = strtolower((string) ($parts['host'] ?? ''));
+        $path = (string) ($parts['path'] ?? '');
+        if ($host === 'api.github.com') {
+            return str_starts_with($path, '/repos/' . $this->gitHubRepo . '/releases/assets/')
+                || str_starts_with($path, '/repos/' . $this->gitHubRepo . '/zipball/');
+        }
+
+        return $host === 'github.com'
+            && str_starts_with($path, '/' . $this->gitHubRepo . '/releases/download/');
     }
 
     /**
