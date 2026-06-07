@@ -26,6 +26,7 @@ use OxyAI\Oxygen\Rest\HistoryController;
 use OxyAI\Oxygen\Rest\McpController;
 use OxyAI\Oxygen\Security\CapabilityService;
 use OxyAI\Oxygen\Settings\SettingsRepository;
+use OxyAI\Oxygen\Updates\GitHubUpdater;
 
 final class Plugin
 {
@@ -63,6 +64,13 @@ final class Plugin
         (new HistoryController($capabilities, $history, $presets))->register();
         (new McpController($capabilities, $converter, $aiGateway, $presets, pageMutations: $pageMutations, planMode: $planMode, tripleShot: $tripleShot, inspirations: $inspirations, elementCapabilities: $elementCapabilities))->register();
         (new CodexController($capabilities, $promptInstructions, $pageContext, $converter, $pageMutations))->register();
+
+        (new GitHubUpdater(
+            OXYAI_OXYGEN_PATH . 'oxyai-oxygen.php',
+            'PlayUPSK/OxyAI',
+            OXYAI_OXYGEN_VERSION,
+            '/^oxyai-[0-9][0-9A-Za-z.\-]*\.zip$/'
+        ))->register();
 
         add_action('admin_notices', [$this, 'showOxygenNotice']);
     }
