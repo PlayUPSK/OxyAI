@@ -8,13 +8,28 @@ use WP_Error;
 
 final class OxygenPageMutationService
 {
+    use OxygenTreeToolsTrait;
+
     private const BACKUPS_META_KEY = '_oxyai_oxygen_tree_backups';
     private const MAX_BACKUPS = 10;
 
+    /** Map of incoming->assigned node ids from the last mergeTree() call. */
+    private array $lastIdMap = [];
+
+    /** Node ids touched by the last mergeTree() call. */
+    private array $lastChangedNodeIds = [];
+
     /**
+     * Read the persisted Oxygen page tree.
+     *
+     * @param array<string, mixed> $options
+     *        view?: "outline" (default) | "full"
+     *        nodeId?: int   focus a single node/subtree
+     *        depth?: int    limit outline depth
+     *        includeBackups?: bool  include full backup payloads (default false)
      * @return array<string, mixed>|WP_Error
      */
-    public function getTree(int $postId)
+    public function getTree(int $postId, array $options = [])
     {
         $post = get_post($postId);
         if (!$post) {
@@ -22,17 +37,50 @@ final class OxygenPageMutationService
         }
 
         $tree = $this->readTree($postId);
+        $view = strtolower((string) ($options['view'] ?? 'outline'));
+        $backups = $this->listBackups($postId);
 
-        return [
+        $result = [
             'success' => true,
             'postId' => $postId,
             'metaKey' => $this->metaKey(),
             'hasTree' => $tree !== null,
-            'tree' => $tree,
+            'view' => $view === 'full' ? 'full' : 'outline',
             'nodeCount' => $tree !== null ? $this->countTreeNodes($tree) : 0,
             'nextNodeId' => $tree !== null ? $this->calculateNextNodeId($tree['root'] ?? []) : 1,
-            'backups' => $this->listBackups($postId),
+            'backupCount' => count($backups),
         ];
+
+        if (!empty($options['includeBackups'])) {
+            $result['backups'] = $backups;
+        }
+
+        if ($tree === null) {
+            return $result;
+        }
+
+        $focusId = isset($options['nodeId']) && is_numeric($options['nodeId']) ? (int) $options['nodeId'] : null;
+
+        if ($view === 'full') {
+            if ($focusId !== null) {
+                $parent = null;
+                $node = $this->findNodeCopy($tree['root'] ?? [], $focusId, $parent);
+                $result['found'] = $node !== null;
+                $result['node'] = $node;
+            } else {
+                $result['tree'] = $tree;
+            }
+            return $result;
+        }
+
+        $summary = $this->summarizeTree($tree, $options);
+        $result['nodes'] = $summary['nodes'];
+        if (($summary['found'] ?? true) === false) {
+            $result['found'] = false;
+            $result['nodeId'] = $summary['nodeId'] ?? $focusId;
+        }
+
+        return $result;
     }
 
     /**
@@ -68,6 +116,8 @@ final class OxygenPageMutationService
             ? (int) $options['targetNodeId']
             : null;
         $dryRun = !empty($options['dryRun']);
+        $dryRunView = strtolower((string) ($options['dryRunView'] ?? 'full'));
+        $preserveIds = filter_var($options['preserveIds'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
         $registerSelectorsInput = $options['registerSelectors'] ?? $options['options']['registerSelectors'] ?? true;
         $registerSelectors = filter_var($registerSelectorsInput, FILTER_VALIDATE_BOOLEAN);
@@ -79,7 +129,7 @@ final class OxygenPageMutationService
         }
 
         $existingTree = $this->readTree($postId);
-        $newTree = $this->mergeTree($existingTree, $incomingTree, $operation, $targetNodeId);
+        $newTree = $this->mergeTree($existingTree, $incomingTree, $operation, $targetNodeId, $preserveIds);
         if (is_wp_error($newTree)) {
             return $newTree;
         }
@@ -91,6 +141,8 @@ final class OxygenPageMutationService
             'postId' => $postId,
             'targetNodeId' => $targetNodeId,
             'metaKey' => $this->metaKey(),
+            'idMap' => $this->lastIdMap,
+            'changedNodeIds' => $this->lastChangedNodeIds,
             'beforeNodeCount' => $existingTree !== null ? $this->countTreeNodes($existingTree) : 0,
             'afterNodeCount' => $this->countTreeNodes($newTree),
             'viewUrl' => get_permalink($postId),
@@ -120,7 +172,12 @@ final class OxygenPageMutationService
         }
 
         if ($dryRun) {
-            $result['tree'] = $newTree;
+            // Token-efficient by default: outline + changed ids. Pass
+            // dryRunView:"full" to also receive the entire proposed tree.
+            $result['outline'] = $this->summarizeTree($newTree)['nodes'];
+            if ($dryRunView === 'full') {
+                $result['tree'] = $newTree;
+            }
             return $result;
         }
 
@@ -325,29 +382,50 @@ final class OxygenPageMutationService
      * @param array<string, mixed> $incomingTree
      * @return array<string, mixed>|WP_Error
      */
-    private function mergeTree(?array $existingTree, array $incomingTree, string $operation, ?int $targetNodeId)
+    private function mergeTree(?array $existingTree, array $incomingTree, string $operation, ?int $targetNodeId, bool $preserveIds = false)
     {
         $incomingTree = $this->normalizeDocumentTree($incomingTree);
+        $this->lastIdMap = [];
+        $this->lastChangedNodeIds = [];
 
         if ($operation === 'replace') {
             $root = $incomingTree['root'] ?? [];
-            $this->reindexElementTree($root, 1);
+            if (is_array($root)) {
+                if ($preserveIds && $this->canPreserveIncomingIds($root, [])) {
+                    $this->recordPreservedIdAssignments($root);
+                } else {
+                    $this->reindexElementTree($root, 1, $this->lastIdMap);
+                }
+                $this->setLastChangedNodeIdsFromSubtree($root);
+            }
             return $this->normalizeDocumentTree(is_array($root) ? $root : $incomingTree);
         }
 
         if ($operation === 'append') {
-            if ($existingTree === null) {
-                return $incomingTree;
-            }
-
-            $tree = $this->normalizeDocumentTree($existingTree);
             $incomingRoot = $incomingTree['root'] ?? [];
             if (!is_array($incomingRoot)) {
                 return new WP_Error('oxyai_invalid_oxygen_payload', __('Converted Oxygen tree has no root node.', 'oxyai-oxygen'), ['status' => 400]);
             }
 
-            $nextId = $this->calculateNextNodeId($tree['root'] ?? []);
-            $this->reindexElementTree($incomingRoot, $nextId);
+            if ($existingTree === null) {
+                if ($preserveIds && $this->canPreserveIncomingIds($incomingRoot, [])) {
+                    $this->recordPreservedIdAssignments($incomingRoot);
+                } else {
+                    $this->reindexElementTree($incomingRoot, 1, $this->lastIdMap);
+                }
+                $this->setLastChangedNodeIdsFromSubtree($incomingRoot);
+
+                return $this->normalizeDocumentTree($incomingRoot);
+            }
+
+            $tree = $this->normalizeDocumentTree($existingTree);
+            if ($preserveIds && $this->canPreserveIncomingIds($incomingRoot, $tree['root'] ?? [])) {
+                $this->recordPreservedIdAssignments($incomingRoot);
+            } else {
+                $nextId = $this->calculateNextNodeId($tree['root'] ?? []);
+                $this->reindexElementTree($incomingRoot, $nextId, $this->lastIdMap);
+            }
+            $this->setLastChangedNodeIdsFromSubtree($incomingRoot);
 
             if (!isset($tree['root']['children']) || !is_array($tree['root']['children'])) {
                 $tree['root']['children'] = [];
@@ -373,8 +451,14 @@ final class OxygenPageMutationService
 
             $beforeFingerprint = $this->fingerprintNonTargetNodes($tree, $targetNodeId);
 
-            $nextId = $this->calculateNextNodeId($tree['root'] ?? []);
-            $this->reindexElementTreePreservingRoot($incomingRoot, $targetNodeId, $nextId);
+            if ($preserveIds && $this->canPreserveIncomingIdsForReplacement($incomingRoot, $tree['root'] ?? [], $targetNodeId)) {
+                $this->recordPreservedIdAssignments($incomingRoot, $targetNodeId);
+                $incomingRoot['id'] = $targetNodeId;
+            } else {
+                $nextId = $this->calculateNextNodeId($tree['root'] ?? []);
+                $this->reindexElementTreePreservingRoot($incomingRoot, $targetNodeId, $nextId, $this->lastIdMap);
+            }
+            $this->setLastChangedNodeIdsFromSubtree($incomingRoot);
 
             if (!$this->replaceNode($tree['root'], $targetNodeId, $incomingRoot)) {
                 return new WP_Error('oxyai_target_node_not_found', __('Target node was not found in the Oxygen tree.', 'oxyai-oxygen'), ['status' => 404]);
@@ -512,10 +596,17 @@ final class OxygenPageMutationService
 
     /**
      * @param array<string, mixed> $element
+     * @param array<int, int> $map incoming id -> assigned id (recorded)
      */
-    private function reindexElementTree(array &$element, int $nextId): int
+    private function reindexElementTree(array &$element, int $nextId, array &$map = []): int
     {
-        $element['id'] = max(1, $nextId++);
+        $oldId = isset($element['id']) && is_numeric($element['id']) ? (int) $element['id'] : null;
+        $assigned = max(1, $nextId++);
+        $element['id'] = $assigned;
+        if ($oldId !== null) {
+            $map[$oldId] = $assigned;
+        }
+
         $children = $element['children'] ?? [];
         if (!is_array($children)) {
             return $nextId;
@@ -523,7 +614,7 @@ final class OxygenPageMutationService
 
         foreach ($children as &$child) {
             if (is_array($child)) {
-                $nextId = $this->reindexElementTree($child, $nextId);
+                $nextId = $this->reindexElementTree($child, $nextId, $map);
             }
         }
         unset($child);
@@ -534,10 +625,16 @@ final class OxygenPageMutationService
 
     /**
      * @param array<string, mixed> $element
+     * @param array<int, int> $map incoming id -> assigned id (recorded)
      */
-    private function reindexElementTreePreservingRoot(array &$element, int $rootId, int $nextId): int
+    private function reindexElementTreePreservingRoot(array &$element, int $rootId, int $nextId, array &$map = []): int
     {
+        $oldId = isset($element['id']) && is_numeric($element['id']) ? (int) $element['id'] : null;
         $element['id'] = $rootId;
+        if ($oldId !== null) {
+            $map[$oldId] = $rootId;
+        }
+
         $children = $element['children'] ?? [];
         if (!is_array($children)) {
             return $nextId;
@@ -545,13 +642,125 @@ final class OxygenPageMutationService
 
         foreach ($children as &$child) {
             if (is_array($child)) {
-                $nextId = $this->reindexElementTree($child, $nextId);
+                $nextId = $this->reindexElementTree($child, $nextId, $map);
             }
         }
         unset($child);
         $element['children'] = $children;
 
         return $nextId;
+    }
+
+    /**
+     * Collect every node id present in a subtree.
+     *
+     * @param mixed $node
+     * @param array<int, int> $ids
+     */
+    private function collectNodeIds($node, array &$ids): void
+    {
+        if (!is_array($node)) {
+            return;
+        }
+        if (isset($node['id']) && is_numeric($node['id'])) {
+            $ids[] = (int) $node['id'];
+        }
+        foreach (($node['children'] ?? []) as $child) {
+            $this->collectNodeIds($child, $ids);
+        }
+    }
+
+    /**
+     * Record an incoming->assigned map for a preserveIds path. Children keep
+     * their ids; the root may be forced to a different assigned id.
+     *
+     * @param array<string, mixed> $node
+     */
+    private function recordPreservedIdAssignments(array $node, ?int $forcedRootId = null, bool $isRoot = true): void
+    {
+        if (isset($node['id']) && is_numeric($node['id'])) {
+            $oldId = (int) $node['id'];
+            $this->lastIdMap[$oldId] = $isRoot && $forcedRootId !== null ? $forcedRootId : $oldId;
+        }
+
+        foreach (($node['children'] ?? []) as $child) {
+            if (is_array($child)) {
+                $this->recordPreservedIdAssignments($child, null, false);
+            }
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $node
+     */
+    private function setLastChangedNodeIdsFromSubtree(array $node): void
+    {
+        $ids = [];
+        $this->collectNodeIds($node, $ids);
+        $this->lastChangedNodeIds = array_values(array_unique($ids));
+    }
+
+    /**
+     * True when the incoming subtree's ids are all present, unique, and do not
+     * collide with ids already in the destination tree (optionally ignoring the
+     * subtree being replaced). Enables preserveIds without corrupting the tree.
+     *
+     * @param array<string, mixed> $incomingRoot
+     * @param array<string, mixed> $destinationRoot
+     */
+    private function canPreserveIncomingIds(array $incomingRoot, array $destinationRoot, ?int $ignoreSubtreeId = null): bool
+    {
+        $incomingIds = [];
+        $this->collectNodeIds($incomingRoot, $incomingIds);
+        if ($incomingIds === [] || count($incomingIds) !== count(array_unique($incomingIds))) {
+            return false;
+        }
+        // Every node must carry an id.
+        $incomingCount = $this->countElementNodes($incomingRoot);
+        if (count($incomingIds) !== $incomingCount) {
+            return false;
+        }
+
+        $destIds = [];
+        $this->collectNodeIds($destinationRoot, $destIds);
+        if ($ignoreSubtreeId !== null) {
+            $ignore = [];
+            $ignoreNode = null;
+            $parent = null;
+            $ignoreNode = $this->findNodeCopy($destinationRoot, $ignoreSubtreeId, $parent);
+            if (is_array($ignoreNode)) {
+                $this->collectNodeIds($ignoreNode, $ignore);
+            }
+            $destIds = array_values(array_diff($destIds, $ignore));
+        }
+
+        return array_intersect($incomingIds, $destIds) === [];
+    }
+
+    /**
+     * replace_node preserveIds forces the incoming root id to the target id,
+     * so reject the preserve path if that would duplicate a descendant id.
+     *
+     * @param array<string, mixed> $incomingRoot
+     * @param array<string, mixed> $destinationRoot
+     */
+    private function canPreserveIncomingIdsForReplacement(array $incomingRoot, array $destinationRoot, int $targetNodeId): bool
+    {
+        if (!$this->canPreserveIncomingIds($incomingRoot, $destinationRoot, $targetNodeId)) {
+            return false;
+        }
+
+        $rootId = isset($incomingRoot['id']) && is_numeric($incomingRoot['id']) ? (int) $incomingRoot['id'] : null;
+        if ($rootId === $targetNodeId) {
+            return true;
+        }
+
+        $descendantIds = [];
+        foreach (($incomingRoot['children'] ?? []) as $child) {
+            $this->collectNodeIds($child, $descendantIds);
+        }
+
+        return !in_array($targetNodeId, $descendantIds, true);
     }
 
     /**

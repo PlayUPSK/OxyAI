@@ -28,6 +28,11 @@ final class OxygenElementCapabilityService
                     $elements = [$requestedElementType => $runtimeElement];
                 }
             }
+
+            // Focused, token-efficient view: return only this element, its
+            // contract, and a concrete example node - NOT the multi-hundred-KB
+            // runtime catalog and full coverage policies.
+            return $this->elementFocus($requestedElementType, $elements, $essentialContracts);
         }
 
         return [
@@ -151,6 +156,88 @@ final class OxygenElementCapabilityService
             ],
             'elements' => array_values($elements),
         ];
+    }
+
+    /**
+     * Focused single-element capability view.
+     *
+     * @param array<string, array<string, mixed>> $elements
+     * @param array<string, mixed> $essentialContracts
+     * @return array<string, mixed>
+     */
+    private function elementFocus(string $elementType, array $elements, array $essentialContracts): array
+    {
+        $element = $elements === [] ? null : array_values($elements)[0];
+
+        return [
+            'success' => true,
+            'oxygenVersionTarget' => 'Oxygen 6 / Breakdance Oxygen',
+            'view' => 'element',
+            'elementType' => $elementType,
+            'element' => $element,
+            // Kept (plural) for backward compatibility with existing consumers.
+            'elements' => array_values($elements),
+            'contractStatuses' => $essentialContracts,
+            'exampleNode' => $this->exampleNode($elementType),
+            'nativeDesignPolicy' => [
+                'Every native style value must be written under breakpoint_base unless a real responsive mapping is implemented.',
+                'Length values must use Oxygen structured values: {number, unit, style}.',
+                'Direct single-class @media (max-width) rules can map to Oxygen breakpoint selector properties when every declaration is supported.',
+            ],
+            'knownNativeSelectorGaps' => [
+                'grid-template-columns/rows are captured in design data but NOT emitted by the Oxygen selector compiler on verified Oxygen 6.',
+                'flex-wrap, flex-grow, flex-shrink, flex-basis are captured but were not emitted either.',
+                'For CSS grid, flex wrapping, or flex item growth, prefer a class CSS rule or upsert_css_block over inline native design.',
+            ],
+            'note' => 'Focused single-element view. Omit elementType to get the full catalog (large).',
+        ];
+    }
+
+    /**
+     * A minimal, valid example node for the requested element type. Content
+     * paths are filled; layout that the selector compiler cannot emit is left
+     * to a CssCode block / class CSS rather than inline design.
+     *
+     * @return array<string, mixed>
+     */
+    private function exampleNode(string $elementType): array
+    {
+        $type = ltrim($elementType, '\\');
+        $node = static fn (array $content): array => [
+            'data' => ['type' => $type, 'properties' => ['content' => ['content' => $content]]],
+            'children' => [],
+        ];
+
+        return match ($type) {
+            ElementTypes::ESSENTIAL_TEXT_LINK, ElementTypes::TEXT_LINK, ElementTypes::ESSENTIAL_BUTTON => $node([
+                'text' => 'Example link',
+                'link' => ['type' => 'url', 'url' => 'https://example.com', 'openInNewTab' => false],
+            ]),
+            ElementTypes::TEXT, ElementTypes::ESSENTIAL_TEXT, ElementTypes::ESSENTIAL_HEADING => $node([
+                'text' => 'Example text',
+            ]),
+            ElementTypes::IMAGE, ElementTypes::ESSENTIAL_IMAGE => [
+                'data' => ['type' => $type, 'properties' => ['content' => ['image' => [
+                    'from' => 'url',
+                    'url' => 'https://example.com/image.jpg',
+                    'alt' => 'Example image',
+                ]]]],
+                'children' => [],
+            ],
+            ElementTypes::CONTAINER, ElementTypes::CONTAINER_LINK => [
+                'data' => [
+                    'type' => $type,
+                    'properties' => ['settings' => ['advanced' => ['classes' => ['example-wrapper']]]],
+                ],
+                'children' => [],
+                '_note' => 'Plain container. For flex-column/grid layout, attach a class CSS rule or an upsert_css_block targeting .example-wrapper - the Oxygen selector compiler does not emit grid/flex-wrap from inline native design.',
+            ],
+            default => [
+                'data' => ['type' => $type, 'properties' => ['content' => ['content' => []]]],
+                'children' => [],
+                '_note' => 'Generic node skeleton. Check requiredContentPaths in "element" above and fill content.content accordingly.',
+            ],
+        };
     }
 
     /**

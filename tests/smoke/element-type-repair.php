@@ -72,6 +72,7 @@ if (!function_exists('get_edit_post_link')) {
     }
 }
 
+require_once __DIR__ . '/../../src/Oxygen/OxygenTreeToolsTrait.php';
 require_once __DIR__ . '/../../src/Oxygen/OxygenPageMutationService.php';
 
 $service = new OxygenPageMutationService();
