@@ -20,6 +20,7 @@ use OxyAI\Oxygen\Security\CapabilityService;
 use OxyAI\Oxygen\Source\SourceBundle;
 use WP_Error;
 use WP_REST_Request;
+use WP_REST_Response;
 
 final class McpController
 {
@@ -718,14 +719,19 @@ final class McpController
      */
     private function writeOptions(array $input): array
     {
+        $nestedOptions = is_array($input['options'] ?? null) ? $input['options'] : [];
         $options = [];
         foreach (['dryRun', 'recompile', 'preserveIds'] as $flag) {
             if (array_key_exists($flag, $input)) {
                 $options[$flag] = filter_var($input[$flag], FILTER_VALIDATE_BOOLEAN);
+            } elseif (array_key_exists($flag, $nestedOptions)) {
+                $options[$flag] = filter_var($nestedOptions[$flag], FILTER_VALIDATE_BOOLEAN);
             }
         }
         if (isset($input['dryRunView']) && is_string($input['dryRunView'])) {
             $options['dryRunView'] = $input['dryRunView'];
+        } elseif (isset($nestedOptions['dryRunView']) && is_string($nestedOptions['dryRunView'])) {
+            $options['dryRunView'] = $nestedOptions['dryRunView'];
         }
 
         return $options;

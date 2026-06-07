@@ -16,6 +16,9 @@ final class OxygenPageMutationService
     /** Map of incoming->assigned node ids from the last mergeTree() call. */
     private array $lastIdMap = [];
 
+    /** Node ids touched by the last mergeTree() call. */
+    private array $lastChangedNodeIds = [];
+
     /**
      * Read the persisted Oxygen page tree.
      *
@@ -132,7 +135,7 @@ final class OxygenPageMutationService
             'targetNodeId' => $targetNodeId,
             'metaKey' => $this->metaKey(),
             'idMap' => $this->lastIdMap,
-            'changedNodeIds' => array_values($this->lastIdMap),
+            'changedNodeIds' => $this->lastChangedNodeIds,
             'beforeNodeCount' => $existingTree !== null ? $this->countTreeNodes($existingTree) : 0,
             'afterNodeCount' => $this->countTreeNodes($newTree),
             'viewUrl' => get_permalink($postId),
@@ -358,32 +361,46 @@ final class OxygenPageMutationService
     {
         $incomingTree = $this->normalizeDocumentTree($incomingTree);
         $this->lastIdMap = [];
+        $this->lastChangedNodeIds = [];
 
         if ($operation === 'replace') {
             $root = $incomingTree['root'] ?? [];
-            if (!(is_array($root) && $preserveIds && $this->canPreserveIncomingIds($root, []))) {
-                if (is_array($root)) {
+            if (is_array($root)) {
+                if ($preserveIds && $this->canPreserveIncomingIds($root, [])) {
+                    $this->recordPreservedIdAssignments($root);
+                } else {
                     $this->reindexElementTree($root, 1, $this->lastIdMap);
                 }
+                $this->setLastChangedNodeIdsFromSubtree($root);
             }
             return $this->normalizeDocumentTree(is_array($root) ? $root : $incomingTree);
         }
 
         if ($operation === 'append') {
-            if ($existingTree === null) {
-                return $incomingTree;
-            }
-
-            $tree = $this->normalizeDocumentTree($existingTree);
             $incomingRoot = $incomingTree['root'] ?? [];
             if (!is_array($incomingRoot)) {
                 return new WP_Error('oxyai_invalid_oxygen_payload', __('Converted Oxygen tree has no root node.', 'oxyai-oxygen'), ['status' => 400]);
             }
 
-            if (!($preserveIds && $this->canPreserveIncomingIds($incomingRoot, $tree['root'] ?? []))) {
+            if ($existingTree === null) {
+                if ($preserveIds && $this->canPreserveIncomingIds($incomingRoot, [])) {
+                    $this->recordPreservedIdAssignments($incomingRoot);
+                } else {
+                    $this->reindexElementTree($incomingRoot, 1, $this->lastIdMap);
+                }
+                $this->setLastChangedNodeIdsFromSubtree($incomingRoot);
+
+                return $this->normalizeDocumentTree($incomingRoot);
+            }
+
+            $tree = $this->normalizeDocumentTree($existingTree);
+            if ($preserveIds && $this->canPreserveIncomingIds($incomingRoot, $tree['root'] ?? [])) {
+                $this->recordPreservedIdAssignments($incomingRoot);
+            } else {
                 $nextId = $this->calculateNextNodeId($tree['root'] ?? []);
                 $this->reindexElementTree($incomingRoot, $nextId, $this->lastIdMap);
             }
+            $this->setLastChangedNodeIdsFromSubtree($incomingRoot);
 
             if (!isset($tree['root']['children']) || !is_array($tree['root']['children'])) {
                 $tree['root']['children'] = [];
@@ -409,16 +426,14 @@ final class OxygenPageMutationService
 
             $beforeFingerprint = $this->fingerprintNonTargetNodes($tree, $targetNodeId);
 
-            if ($preserveIds && $this->canPreserveIncomingIds($incomingRoot, $tree['root'] ?? [], $targetNodeId)) {
-                $oldRootId = isset($incomingRoot['id']) && is_numeric($incomingRoot['id']) ? (int) $incomingRoot['id'] : null;
+            if ($preserveIds && $this->canPreserveIncomingIdsForReplacement($incomingRoot, $tree['root'] ?? [], $targetNodeId)) {
+                $this->recordPreservedIdAssignments($incomingRoot, $targetNodeId);
                 $incomingRoot['id'] = $targetNodeId;
-                if ($oldRootId !== null) {
-                    $this->lastIdMap[$oldRootId] = $targetNodeId;
-                }
             } else {
                 $nextId = $this->calculateNextNodeId($tree['root'] ?? []);
                 $this->reindexElementTreePreservingRoot($incomingRoot, $targetNodeId, $nextId, $this->lastIdMap);
             }
+            $this->setLastChangedNodeIdsFromSubtree($incomingRoot);
 
             if (!$this->replaceNode($tree['root'], $targetNodeId, $incomingRoot)) {
                 return new WP_Error('oxyai_target_node_not_found', __('Target node was not found in the Oxygen tree.', 'oxyai-oxygen'), ['status' => 404]);
@@ -631,6 +646,36 @@ final class OxygenPageMutationService
     }
 
     /**
+     * Record an incoming->assigned map for a preserveIds path. Children keep
+     * their ids; the root may be forced to a different assigned id.
+     *
+     * @param array<string, mixed> $node
+     */
+    private function recordPreservedIdAssignments(array $node, ?int $forcedRootId = null, bool $isRoot = true): void
+    {
+        if (isset($node['id']) && is_numeric($node['id'])) {
+            $oldId = (int) $node['id'];
+            $this->lastIdMap[$oldId] = $isRoot && $forcedRootId !== null ? $forcedRootId : $oldId;
+        }
+
+        foreach (($node['children'] ?? []) as $child) {
+            if (is_array($child)) {
+                $this->recordPreservedIdAssignments($child, null, false);
+            }
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $node
+     */
+    private function setLastChangedNodeIdsFromSubtree(array $node): void
+    {
+        $ids = [];
+        $this->collectNodeIds($node, $ids);
+        $this->lastChangedNodeIds = array_values(array_unique($ids));
+    }
+
+    /**
      * True when the incoming subtree's ids are all present, unique, and do not
      * collide with ids already in the destination tree (optionally ignoring the
      * subtree being replaced). Enables preserveIds without corrupting the tree.
@@ -665,6 +710,32 @@ final class OxygenPageMutationService
         }
 
         return array_intersect($incomingIds, $destIds) === [];
+    }
+
+    /**
+     * replace_node preserveIds forces the incoming root id to the target id,
+     * so reject the preserve path if that would duplicate a descendant id.
+     *
+     * @param array<string, mixed> $incomingRoot
+     * @param array<string, mixed> $destinationRoot
+     */
+    private function canPreserveIncomingIdsForReplacement(array $incomingRoot, array $destinationRoot, int $targetNodeId): bool
+    {
+        if (!$this->canPreserveIncomingIds($incomingRoot, $destinationRoot, $targetNodeId)) {
+            return false;
+        }
+
+        $rootId = isset($incomingRoot['id']) && is_numeric($incomingRoot['id']) ? (int) $incomingRoot['id'] : null;
+        if ($rootId === $targetNodeId) {
+            return true;
+        }
+
+        $descendantIds = [];
+        foreach (($incomingRoot['children'] ?? []) as $child) {
+            $this->collectNodeIds($child, $descendantIds);
+        }
+
+        return !in_array($targetNodeId, $descendantIds, true);
     }
 
     /**

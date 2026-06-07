@@ -55,6 +55,19 @@ $check = static function (bool $cond, string $msg) use (&$failures): void {
         fwrite(STDERR, "FAIL: {$msg}\n");
     }
 };
+$collectIds = static function (array $node) use (&$collectIds): array {
+    $ids = [];
+    if (isset($node['id']) && is_numeric($node['id'])) {
+        $ids[] = (int) $node['id'];
+    }
+    foreach (($node['children'] ?? []) as $child) {
+        if (is_array($child)) {
+            $ids = array_merge($ids, $collectIds($child));
+        }
+    }
+
+    return $ids;
+};
 
 $svc = new OxygenPageMutationService();
 
@@ -123,67 +136,186 @@ $ops = [
 ];
 $res = $svc->applyNodeOperations($tree, $ops);
 $check(!is_wp_error($res), '#2 batch ops succeed');
+$after = $tree;
+if (!is_wp_error($res)) {
+    $after = $res['tree'];
+    // locate container 121 in result
+    $find121 = null;
+    $walk = function ($node) use (&$walk, &$find121): void {
+        if (($node['id'] ?? null) === 121) {
+            $find121 = $node;
+        }
+        foreach ($node['children'] ?? [] as $c) {
+            $walk($c);
+        }
+    };
+    $walk($after['root']);
+    $check($find121 !== null, '#2 container 121 present');
+    $childIds = array_map(static fn ($c) => $c['id'], $find121['children'] ?? []);
+    $check($childIds === [122, 123, 117, 119], '#2 email+phone icon/link stacked into one container');
+    $check(($find121['children'][1]['data']['type'] ?? '') === 'EssentialElements\\TextLink', '#2 set_node_type applied');
+    $check(($find121['children'][1]['data']['properties']['content']['content']['link']['url'] ?? '') === 'mailto:info@mk-mat.com', '#2 set path applied');
 
-$after = $res['tree'];
-// locate container 121 in result
-$find121 = null;
-$walk = function ($node) use (&$walk, &$find121): void {
-    if (($node['id'] ?? null) === 121) {
-        $find121 = $node;
-    }
-    foreach ($node['children'] ?? [] as $c) {
-        $walk($c);
-    }
-};
-$walk($after['root']);
-$check($find121 !== null, '#2 container 121 present');
-$childIds = array_map(static fn ($c) => $c['id'], $find121['children'] ?? []);
-$check($childIds === [122, 123, 117, 119], '#2 email+phone icon/link stacked into one container');
-$check(($find121['children'][1]['data']['type'] ?? '') === 'EssentialElements\\TextLink', '#2 set_node_type applied');
-$check(($find121['children'][1]['data']['properties']['content']['content']['link']['url'] ?? '') === 'mailto:info@mk-mat.com', '#2 set path applied');
+    // 129 deleted
+    $has129 = false;
+    $walk2 = function ($node) use (&$walk2, &$has129): void {
+        if (($node['id'] ?? null) === 129) {
+            $has129 = true;
+        }
+        foreach ($node['children'] ?? [] as $c) {
+            $walk2($c);
+        }
+    };
+    $walk2($after['root']);
+    $check($has129 === false, '#2 delete_node removed phone area');
+    $check(in_array(129, $res['changedNodeIds'], true), '#2 changedNodeIds includes deleted node');
+    $check(in_array(120, $res['changedNodeIds'], true) && in_array(121, $res['changedNodeIds'], true), '#2 move_node marks old and new parents changed');
 
-// 129 deleted
-$has129 = false;
-$walk2 = function ($node) use (&$walk2, &$has129): void {
-    if (($node['id'] ?? null) === 129) {
-        $has129 = true;
-    }
-    foreach ($node['children'] ?? [] as $c) {
-        $walk2($c);
-    }
-};
-$walk2($after['root']);
-$check($has129 === false, '#2 delete_node removed phone area');
-$check(in_array(129, $res['changedNodeIds'], true), '#2 changedNodeIds includes deleted node');
-
-// 128 link unset
-$find128 = null;
-$walk3 = function ($node) use (&$walk3, &$find128): void {
-    if (($node['id'] ?? null) === 128) {
-        $find128 = $node;
-    }
-    foreach ($node['children'] ?? [] as $c) {
-        $walk3($c);
-    }
-};
-$walk3($after['root']);
-$check(!isset($find128['data']['properties']['content']['content']['link']), '#2 unset removed outer link');
+    // 128 link unset
+    $find128 = null;
+    $walk3 = function ($node) use (&$walk3, &$find128): void {
+        if (($node['id'] ?? null) === 128) {
+            $find128 = $node;
+        }
+        foreach ($node['children'] ?? [] as $c) {
+            $walk3($c);
+        }
+    };
+    $walk3($after['root']);
+    $check(!isset($find128['data']['properties']['content']['content']['link']), '#2 unset removed outer link');
+}
 
 // ---- #3 css block idempotency ----
 $blocks = $svc->listCssBlocksInTree($after);
 $check(count($blocks) === 1 && $blocks[0]['key'] === 'contact', '#3 css block created with key');
 
 $res2 = $svc->applyNodeOperations($after, [['op' => 'upsert_css', 'key' => 'contact', 'css' => '.x{display:flex}']]);
-$blocks2 = $svc->listCssBlocksInTree($res2['tree']);
-$check(count($blocks2) === 1, '#3 upsert is idempotent (no duplicate block)');
+$check(!is_wp_error($res2), '#3 css upsert update succeeds');
+$after2 = $after;
+if (!is_wp_error($res2)) {
+    $after2 = $res2['tree'];
+    $blocks2 = $svc->listCssBlocksInTree($after2);
+    $check(count($blocks2) === 1, '#3 upsert is idempotent (no duplicate block)');
+}
 
-$res3 = $svc->applyNodeOperations($res2['tree'], [['op' => 'remove_css', 'key' => 'contact']]);
-$blocks3 = $svc->listCssBlocksInTree($res3['tree']);
-$check(count($blocks3) === 0, '#3 remove_css deletes block');
+$res3 = $svc->applyNodeOperations($after2, [['op' => 'remove_css', 'key' => 'contact']]);
+$check(!is_wp_error($res3), '#3 remove_css succeeds');
+if (!is_wp_error($res3)) {
+    $blocks3 = $svc->listCssBlocksInTree($res3['tree']);
+    $check(count($blocks3) === 0, '#3 remove_css deletes block');
+}
 
 // ---- #2 insert_node assigns a fresh id + idMap ----
 $res4 = $svc->applyNodeOperations($tree, [['op' => 'insert_node', 'parentId' => 104, 'node' => ['id' => 999, 'data' => ['type' => 'EssentialElements\\MenuLink', 'properties' => ['content' => ['content' => ['text' => 'New']]]], 'children' => []]]]);
-$check(isset($res4['idMap'][999]) && $res4['idMap'][999] !== 999, '#2 insert_node remaps temp id via idMap');
+$check(!is_wp_error($res4), '#2 insert_node succeeds');
+if (!is_wp_error($res4)) {
+    $check(isset($res4['idMap'][999]) && $res4['idMap'][999] !== 999, '#2 insert_node remaps temp id via idMap');
+}
+
+$res5 = $svc->applyNodeOperations($tree, [[
+    'op' => 'insert_node',
+    'parentId' => 104,
+    'node' => [
+        'id' => 900,
+        'data' => ['type' => 'OxygenElements\\Container'],
+        'children' => [[
+            'id' => 901,
+            'data' => ['type' => 'EssentialElements\\MenuLink', 'properties' => ['content' => ['content' => ['text' => 'Nested']]]],
+            'children' => [],
+        ]],
+    ],
+]]);
+$check(!is_wp_error($res5), '#2 insert subtree succeeds');
+if (!is_wp_error($res5)) {
+    $check(isset($res5['idMap'][900], $res5['idMap'][901]), '#2 insert subtree reports full idMap');
+    $check(
+        in_array($res5['idMap'][900], $res5['changedNodeIds'], true) && in_array($res5['idMap'][901], $res5['changedNodeIds'], true),
+        '#2 insert subtree reports all changed ids'
+    );
+}
+
+// ---- mergeTree preserve/renumber edge cases ----
+$reflection = new ReflectionClass($svc);
+$mergeTree = $reflection->getMethod('mergeTree');
+$mergeTree->setAccessible(true);
+$lastIdMapProp = $reflection->getProperty('lastIdMap');
+$lastIdMapProp->setAccessible(true);
+$lastChangedProp = $reflection->getProperty('lastChangedNodeIds');
+$lastChangedProp->setAccessible(true);
+
+$appendFromEmpty = $mergeTree->invoke($svc, null, [
+    'root' => [
+        'id' => 50,
+        'data' => ['type' => 'OxygenElements\\Container'],
+        'children' => [[
+            'id' => 51,
+            'data' => ['type' => 'OxygenElements\\Text', 'properties' => ['content' => ['content' => ['text' => 'Hi']]]],
+            'children' => [],
+        ]],
+    ],
+], 'append', null, false);
+$check(!is_wp_error($appendFromEmpty), 'append-to-empty merge succeeds');
+if (!is_wp_error($appendFromEmpty)) {
+    $check(($appendFromEmpty['root']['id'] ?? null) === 1, 'append-to-empty renumbers root when preserveIds=false');
+    $check(($appendFromEmpty['root']['children'][0]['id'] ?? null) === 2, 'append-to-empty renumbers descendants when preserveIds=false');
+    $appendMap = $lastIdMapProp->getValue($svc);
+    $appendChanged = $lastChangedProp->getValue($svc);
+    $check(($appendMap[50] ?? null) === 1 && ($appendMap[51] ?? null) === 2, 'append-to-empty preserves full idMap');
+    $check($appendChanged === [1, 2], 'append-to-empty reports changed ids');
+}
+
+$preserveAppend = $mergeTree->invoke($svc, $tree, [
+    'root' => [
+        'id' => 800,
+        'data' => ['type' => 'OxygenElements\\Container'],
+        'children' => [[
+            'id' => 801,
+            'data' => ['type' => 'OxygenElements\\Text', 'properties' => ['content' => ['content' => ['text' => 'Keep ids']]]],
+            'children' => [],
+        ]],
+    ],
+], 'append', null, true);
+$check(!is_wp_error($preserveAppend), 'append preserveIds merge succeeds');
+if (!is_wp_error($preserveAppend)) {
+    $preserveMap = $lastIdMapProp->getValue($svc);
+    $preserveChanged = $lastChangedProp->getValue($svc);
+    $check(($preserveMap[800] ?? null) === 800 && ($preserveMap[801] ?? null) === 801, 'preserveIds keeps full idMap');
+    $check(in_array(800, $preserveChanged, true) && in_array(801, $preserveChanged, true), 'preserveIds still reports changed ids');
+}
+
+$replacePreserve = $mergeTree->invoke($svc, [
+    'root' => [
+        'id' => 1,
+        'data' => ['type' => 'root'],
+        'children' => [[
+            'id' => 10,
+            'data' => ['type' => 'OxygenElements\\Container'],
+            'children' => [[
+                'id' => 11,
+                'data' => ['type' => 'OxygenElements\\Text', 'properties' => ['content' => ['content' => ['text' => 'old']]]],
+                'children' => [],
+            ]],
+        ]],
+    ],
+], [
+    'root' => [
+        'id' => 30,
+        'data' => ['type' => 'OxygenElements\\Container'],
+        'children' => [[
+            'id' => 10,
+            'data' => ['type' => 'OxygenElements\\Text', 'properties' => ['content' => ['content' => ['text' => 'new']]]],
+            'children' => [],
+        ]],
+    ],
+], 'replace_node', 10, true);
+$check(!is_wp_error($replacePreserve), 'replace_node preserveIds fallback succeeds');
+if (!is_wp_error($replacePreserve)) {
+    $replaceIds = $collectIds($replacePreserve['root']);
+    $replaceMap = $lastIdMapProp->getValue($svc);
+    $check(count($replaceIds) === count(array_unique($replaceIds)), 'replace_node avoids duplicate ids after forcing root id');
+    $check(($replaceMap[30] ?? null) === 10, 'replace_node remaps replacement root to target id');
+    $check(isset($replaceMap[10]) && $replaceMap[10] !== 10, 'replace_node renumbers conflicting descendants');
+}
 
 // ---- error path ----
 $err = $svc->applyNodeOperations($tree, [['op' => 'delete_node', 'targetNodeId' => 1]]);

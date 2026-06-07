@@ -155,7 +155,17 @@ trait OxygenTreeToolsTrait
     private function trimLabel(string $value): string
     {
         $value = trim(preg_replace('/\s+/', ' ', $value) ?? $value);
-        return mb_strlen($value) > 60 ? mb_substr($value, 0, 57) . '...' : $value;
+        return $this->stringLength($value) > 60 ? $this->stringSlice($value, 0, 57) . '...' : $value;
+    }
+
+    private function stringLength(string $value): int
+    {
+        return function_exists('mb_strlen') ? (int) mb_strlen($value) : strlen($value);
+    }
+
+    private function stringSlice(string $value, int $start, int $length): string
+    {
+        return function_exists('mb_substr') ? (string) mb_substr($value, $start, $length) : substr($value, $start, $length);
     }
 
     /**
@@ -377,7 +387,8 @@ trait OxygenTreeToolsTrait
                     return $this->opError($index, __('A node cannot be moved into itself.', 'oxyai-oxygen'));
                 }
                 $detached = null;
-                if (!$this->detachNodeById($tree['root'], $nodeId, $detached) || !is_array($detached)) {
+                $oldParentId = null;
+                if (!$this->detachNodeById($tree['root'], $nodeId, $detached, $oldParentId) || !is_array($detached)) {
                     return $this->opError($index, __('Node to move was not found.', 'oxyai-oxygen'), 404);
                 }
                 $index2 = $this->intOrNull($op['index'] ?? null);
@@ -385,7 +396,12 @@ trait OxygenTreeToolsTrait
                     return $this->opError($index, __('Destination parent was not found.', 'oxyai-oxygen'), 404);
                 }
                 $changed[] = $nodeId;
-                $changed[] = $toParent;
+                if ($oldParentId !== null) {
+                    $changed[] = $oldParentId;
+                }
+                if ($toParent !== $oldParentId) {
+                    $changed[] = $toParent;
+                }
                 return $tree;
 
             case 'insert_node':
@@ -398,14 +414,19 @@ trait OxygenTreeToolsTrait
                 $nextId = $this->calculateNextNodeId($tree['root'] ?? []);
                 $map = [];
                 $this->reindexElementTree($node, $nextId, $map);
-                if ($providedId !== null && isset($node['id'])) {
-                    $idMap[$providedId] = (int) $node['id'];
-                }
                 $index2 = $this->intOrNull($op['index'] ?? null);
                 if (!$this->insertChild($tree['root'], $parentId, $node, $index2)) {
                     return $this->opError($index, __('Destination parent was not found.', 'oxyai-oxygen'), 404);
                 }
-                $changed[] = (int) $node['id'];
+                foreach ($map as $incomingId => $assignedId) {
+                    $idMap[(int) $incomingId] = $assignedId;
+                }
+                if ($providedId !== null && isset($node['id'])) {
+                    $idMap[$providedId] = (int) $node['id'];
+                }
+                $insertedIds = [];
+                $this->collectSubtreeNodeIds($node, $insertedIds);
+                $changed = array_merge($changed, $insertedIds);
                 return $tree;
 
             case 'upsert_css':
@@ -492,28 +513,48 @@ trait OxygenTreeToolsTrait
      * @param array<string, mixed> $node
      * @param array<string, mixed>|null $detached
      */
-    private function detachNodeById(array &$node, int $targetId, &$detached): bool
+    private function detachNodeById(array &$node, int $targetId, &$detached, ?int &$parentId = null, ?int $currentParentId = null): bool
     {
         if (!isset($node['children']) || !is_array($node['children'])) {
             return false;
         }
 
+        $nodeId = isset($node['id']) && is_numeric($node['id']) ? (int) $node['id'] : $currentParentId;
         foreach ($node['children'] as $i => $child) {
             if (is_array($child) && (int) ($child['id'] ?? 0) === $targetId) {
                 $detached = $child;
+                $parentId = $nodeId;
                 array_splice($node['children'], $i, 1);
                 return true;
             }
         }
 
+        $nextParentId = isset($node['id']) && is_numeric($node['id']) ? (int) $node['id'] : null;
         foreach ($node['children'] as &$child) {
-            if (is_array($child) && $this->detachNodeById($child, $targetId, $detached)) {
+            if (is_array($child) && $this->detachNodeById($child, $targetId, $detached, $parentId, $nextParentId)) {
                 return true;
             }
         }
         unset($child);
 
         return false;
+    }
+
+    /**
+     * @param array<string, mixed> $node
+     * @param array<int, int> $ids
+     */
+    private function collectSubtreeNodeIds(array $node, array &$ids): void
+    {
+        if (isset($node['id']) && is_numeric($node['id'])) {
+            $ids[] = (int) $node['id'];
+        }
+
+        foreach (($node['children'] ?? []) as $child) {
+            if (is_array($child)) {
+                $this->collectSubtreeNodeIds($child, $ids);
+            }
+        }
     }
 
     /**
