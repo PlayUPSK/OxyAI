@@ -105,6 +105,9 @@ $oxygen = [
 $result = $service->applyOxygen(7, $oxygen, [
     'operation' => 'replace',
     'dryRun' => true,
+    // dryRunView default is now "outline" (token-efficient); this assertion
+    // inspects the full proposed tree, so request it explicitly.
+    'dryRunView' => 'full',
     'registerSelectors' => false,
 ]);
 
