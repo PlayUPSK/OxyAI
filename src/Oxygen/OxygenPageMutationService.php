@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OxyAI\Oxygen\Oxygen;
 
+use OxyAI\Oxygen\Codex\ElementWriteValidator;
 use WP_Error;
 
 final class OxygenPageMutationService
@@ -12,6 +13,9 @@ final class OxygenPageMutationService
 
     private const BACKUPS_META_KEY = '_oxyai_oxygen_tree_backups';
     private const MAX_BACKUPS = 10;
+
+    /** Soft cap (bytes) for the full get_oxygen_tree view before it is gated. */
+    private const FULL_VIEW_SIZE_LIMIT = 51200; // 50KB
 
     /** Map of incoming->assigned node ids from the last mergeTree() call. */
     private array $lastIdMap = [];
@@ -37,7 +41,8 @@ final class OxygenPageMutationService
         }
 
         $tree = $this->readTree($postId);
-        $view = strtolower((string) ($options['view'] ?? 'outline'));
+        $requestedView = strtolower((string) ($options['view'] ?? 'outline'));
+        $view = in_array($requestedView, ['full', 'html'], true) ? $requestedView : 'outline';
         $backups = $this->listBackups($postId);
 
         $result = [
@@ -45,7 +50,7 @@ final class OxygenPageMutationService
             'postId' => $postId,
             'metaKey' => $this->metaKey(),
             'hasTree' => $tree !== null,
-            'view' => $view === 'full' ? 'full' : 'outline',
+            'view' => $view,
             'nodeCount' => $tree !== null ? $this->countTreeNodes($tree) : 0,
             'nextNodeId' => $tree !== null ? $this->calculateNextNodeId($tree['root'] ?? []) : 1,
             'backupCount' => count($backups),
@@ -61,15 +66,43 @@ final class OxygenPageMutationService
 
         $focusId = isset($options['nodeId']) && is_numeric($options['nodeId']) ? (int) $options['nodeId'] : null;
 
+        if ($view === 'html') {
+            $rendered = $this->renderTreeHtml($tree, $options);
+            $result['html'] = $rendered['html'];
+            if (($rendered['found'] ?? true) === false) {
+                $result['found'] = false;
+                $result['nodeId'] = $rendered['nodeId'] ?? $focusId;
+            }
+            return $result;
+        }
+
         if ($view === 'full') {
             if ($focusId !== null) {
                 $parent = null;
                 $node = $this->findNodeCopy($tree['root'] ?? [], $focusId, $parent);
                 $result['found'] = $node !== null;
                 $result['node'] = $node;
-            } else {
-                $result['tree'] = $tree;
+                return $result;
             }
+
+            // Size-gate the full view: a 50KB+ JSON payload is the exact thing
+            // that makes round-tripping whole trees expensive. Fall back to the
+            // outline and tell the agent how to scope.
+            $encoded = wp_json_encode($tree);
+            if (is_string($encoded) && strlen($encoded) > self::FULL_VIEW_SIZE_LIMIT) {
+                $result['view'] = 'outline';
+                $result['summarized'] = true;
+                $result['note'] = sprintf(
+                    /* translators: %d: size limit in bytes */
+                    __('Full tree exceeded %d bytes; returning the compact outline. Use nodeId/depth scoping or view:"html" to read targeted regions cheaply.', 'oxyai-oxygen'),
+                    self::FULL_VIEW_SIZE_LIMIT
+                );
+                $summary = $this->summarizeTree($tree, $options);
+                $result['nodes'] = $summary['nodes'];
+                return $result;
+            }
+
+            $result['tree'] = $tree;
             return $result;
         }
 
@@ -116,7 +149,7 @@ final class OxygenPageMutationService
             ? (int) $options['targetNodeId']
             : null;
         $dryRun = !empty($options['dryRun']);
-        $dryRunView = strtolower((string) ($options['dryRunView'] ?? 'full'));
+        $dryRunView = strtolower((string) ($options['dryRunView'] ?? 'outline'));
         $preserveIds = filter_var($options['preserveIds'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
         $registerSelectorsInput = $options['registerSelectors'] ?? $options['options']['registerSelectors'] ?? true;
