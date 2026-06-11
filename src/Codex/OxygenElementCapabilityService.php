@@ -241,6 +241,20 @@ final class OxygenElementCapabilityService
     }
 
     /**
+     * Hand-curated capability registry keyed by full element type.
+     *
+     * Exposed (WordPress-free) so the write validator can consult required
+     * content paths, design buckets, and value shapes without booting the
+     * runtime EnvironmentService catalog.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    public function registry(): array
+    {
+        return $this->elements();
+    }
+
+    /**
      * @return array<string, array<string, mixed>>
      */
     private function elements(): array
