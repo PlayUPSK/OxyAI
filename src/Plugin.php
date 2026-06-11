@@ -57,7 +57,15 @@ final class Plugin
         $promptInstructions = new PromptInstructionService($presets, $inspirations, $elementCapabilities);
         $pageMutations = new OxygenPageMutationService();
 
-        (new AdminPage($settings, $presets, $inspirations, $capabilities))->register();
+        $updater = new GitHubUpdater(
+            OXYAI_OXYGEN_PATH . 'oxyai-oxygen.php',
+            'PlayUPSK/OxyAI',
+            OXYAI_OXYGEN_VERSION,
+            '/^oxyai-[0-9][0-9A-Za-z.\-]*\.zip$/',
+            $settings
+        );
+
+        (new AdminPage($settings, $presets, $inspirations, $capabilities, $updater))->register();
         (new AssetLoader($capabilities))->register();
         (new ConvertController($capabilities, $converter))->register();
         (new AiController($capabilities, $aiGateway, $converter, $history, $planMode, $tripleShot, $inspirations))->register();
@@ -65,12 +73,7 @@ final class Plugin
         (new McpController($capabilities, $converter, $aiGateway, $presets, pageMutations: $pageMutations, planMode: $planMode, tripleShot: $tripleShot, inspirations: $inspirations, elementCapabilities: $elementCapabilities))->register();
         (new CodexController($capabilities, $promptInstructions, $pageContext, $converter, $pageMutations))->register();
 
-        (new GitHubUpdater(
-            OXYAI_OXYGEN_PATH . 'oxyai-oxygen.php',
-            'PlayUPSK/OxyAI',
-            OXYAI_OXYGEN_VERSION,
-            '/^oxyai-[0-9][0-9A-Za-z.\-]*\.zip$/'
-        ))->register();
+        $updater->register();
 
         add_action('admin_notices', [$this, 'showOxygenNotice']);
     }

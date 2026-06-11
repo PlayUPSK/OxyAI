@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace OxyAI\Oxygen\Updates;
 
+use OxyAI\Oxygen\Settings\SettingsRepository;
+
 /**
  * Teaches WordPress to update this plugin from GitHub releases.
  *
@@ -29,17 +31,23 @@ final class GitHubUpdater
     private string $slug;
     private string $transientKey = 'oxyai_oxygen_github_release';
 
+    /** Last verification outcome, surfaced to the admin UI. One of: verified|unverified|failed|''. */
+    private string $lastVerificationStatus = '';
+
     /**
      * @param string $pluginFile  Absolute path to the main plugin file.
      * @param string $gitHubRepo  "owner/repo".
      * @param string $version     Currently installed version.
      * @param string $assetPattern Regex selecting the release asset to install.
+     * @param SettingsRepository|null $settings Optional source for the GitHub
+     *        token and auto-update preference when no constant/filter is set.
      */
     public function __construct(
         private string $pluginFile,
         private string $gitHubRepo,
         private string $version,
-        private string $assetPattern = '/\.zip$/i'
+        private string $assetPattern = '/\.zip$/i',
+        private ?SettingsRepository $settings = null
     ) {
         $this->basename = function_exists('plugin_basename')
             ? plugin_basename($pluginFile)
@@ -55,6 +63,7 @@ final class GitHubUpdater
     {
         add_filter('pre_set_site_transient_update_plugins', [$this, 'injectUpdate']);
         add_filter('plugins_api', [$this, 'pluginInfo'], 20, 3);
+        add_filter('upgrader_pre_download', [$this, 'verifyDownload'], 10, 3);
         add_filter('upgrader_source_selection', [$this, 'fixSourceDir'], 10, 4);
         add_filter('auto_update_plugin', [$this, 'enableAutoUpdate'], 10, 2);
         add_filter('http_request_args', [$this, 'authorizePackageDownloads'], 10, 2);
@@ -193,11 +202,189 @@ final class GitHubUpdater
         if (defined('OXYAI_OXYGEN_DISABLE_AUTO_UPDATES') && OXYAI_OXYGEN_DISABLE_AUTO_UPDATES) {
             return false;
         }
-        if (!function_exists('apply_filters')) {
-            return $update;
+
+        // Constants/filters keep precedence; the stored preference is the
+        // baseline default the filter receives.
+        $default = $update;
+        if ($this->settings !== null) {
+            $default = (bool) $this->settings->get('auto_update_enabled', false);
         }
 
-        return (bool) apply_filters('oxyai_oxygen_enable_auto_updates', $update, $item, $this);
+        if (!function_exists('apply_filters')) {
+            return $default;
+        }
+
+        return (bool) apply_filters('oxyai_oxygen_enable_auto_updates', $default, $item, $this);
+    }
+
+    /**
+     * Download our release package ourselves so we can verify its sha256
+     * against the GitHub asset digest before WordPress installs it.
+     *
+     * Returning a local file path short-circuits WordPress's own download.
+     * Returning false (the default) lets WordPress download normally — we do
+     * that for any package that is not ours.
+     *
+     * @param mixed $reply
+     * @param mixed $package
+     * @param mixed $upgrader
+     * @return mixed false to continue, string local path, or WP_Error on mismatch
+     */
+    public function verifyDownload($reply, $package, $upgrader = null)
+    {
+        if (!is_string($package) || $package === '' || !$this->isGitHubPackageUrl($package)) {
+            return $reply;
+        }
+
+        $expected = $this->expectedDigestForPackage($package);
+        if ($expected === '') {
+            // Nothing to verify against — let WordPress download as usual but
+            // remember that this release shipped without a checksum.
+            $this->lastVerificationStatus = 'unverified';
+            $this->rememberVerificationStatus('unverified');
+            return $reply;
+        }
+
+        if (!function_exists('download_url')) {
+            $fileApi = defined('ABSPATH') ? ABSPATH . 'wp-admin/includes/file.php' : '';
+            if ($fileApi !== '' && is_readable($fileApi)) {
+                require_once $fileApi;
+            }
+        }
+        if (!function_exists('download_url')) {
+            return $reply;
+        }
+
+        $downloaded = download_url($package);
+        if (is_wp_error($downloaded)) {
+            return $downloaded;
+        }
+
+        $verdict = $this->verifyChecksum((string) $downloaded, $expected);
+        if ($verdict !== true) {
+            if (function_exists('wp_delete_file')) {
+                wp_delete_file((string) $downloaded);
+            } elseif (is_file((string) $downloaded)) {
+                @unlink((string) $downloaded);
+            }
+            $this->lastVerificationStatus = 'failed';
+            $this->rememberVerificationStatus('failed');
+
+            $message = function_exists('__')
+                ? __('OxyAI Oxygen update aborted: the downloaded package failed sha256 verification.', 'oxyai-oxygen')
+                : 'OxyAI Oxygen update aborted: the downloaded package failed sha256 verification.';
+            return new \WP_Error('oxyai_oxygen_checksum_mismatch', $message);
+        }
+
+        $this->lastVerificationStatus = 'verified';
+        $this->rememberVerificationStatus('verified');
+
+        return $downloaded;
+    }
+
+    /**
+     * Compare a file's sha256 against the expected hex digest.
+     * Pure helper (no WordPress calls) so it is unit testable.
+     */
+    public function verifyChecksum(string $file, string $expectedSha256): bool
+    {
+        $expected = strtolower(trim($expectedSha256));
+        // Accept the GitHub "sha256:abcdef…" form as well as a bare hex digest.
+        if (str_starts_with($expected, 'sha256:')) {
+            $expected = substr($expected, 7);
+        }
+        if ($expected === '' || !is_file($file)) {
+            return false;
+        }
+
+        $actual = hash_file('sha256', $file);
+        return is_string($actual) && hash_equals($expected, strtolower($actual));
+    }
+
+    /**
+     * Resolve the expected sha256 for a package URL from the cached release:
+     * prefer the asset's GitHub `digest`, else a sidecar `<asset>.sha256`.
+     */
+    private function expectedDigestForPackage(string $package): string
+    {
+        $release = $this->fetchRelease();
+        if ($release === null) {
+            return '';
+        }
+
+        return $this->digestForPackage($release, $package);
+    }
+
+    /**
+     * Pure resolver: given a release payload and a chosen package URL, find the
+     * matching asset's `digest`, or a sidecar `<asset>.sha256` asset's contents.
+     *
+     * @param array<string, mixed> $release
+     */
+    public function digestForPackage(array $release, string $package): string
+    {
+        $assets = is_array($release['assets'] ?? null) ? $release['assets'] : [];
+
+        $matchedName = '';
+        foreach ($assets as $asset) {
+            if (!is_array($asset)) {
+                continue;
+            }
+            $url = (string) ($asset['url'] ?? '');
+            $download = (string) ($asset['browser_download_url'] ?? '');
+            if ($package === $url || $package === $download) {
+                $matchedName = (string) ($asset['name'] ?? '');
+                $digest = trim((string) ($asset['digest'] ?? ''));
+                if ($digest !== '') {
+                    return $digest;
+                }
+            }
+        }
+
+        if ($matchedName === '') {
+            return '';
+        }
+
+        // No inline digest — look for a sidecar "<asset>.sha256".
+        foreach ($assets as $asset) {
+            if (!is_array($asset)) {
+                continue;
+            }
+            if ((string) ($asset['name'] ?? '') !== $matchedName . '.sha256') {
+                continue;
+            }
+            $sidecarUrl = (string) ($asset['browser_download_url'] ?? $asset['url'] ?? '');
+            return $sidecarUrl === '' ? '' : $this->fetchSidecarDigest($sidecarUrl);
+        }
+
+        return '';
+    }
+
+    private function fetchSidecarDigest(string $url): string
+    {
+        if (!function_exists('wp_remote_get')) {
+            return '';
+        }
+        $args = ['timeout' => 10, 'headers' => ['User-Agent' => 'OxyAI-Oxygen-Updater']];
+        $token = $this->gitHubToken();
+        if ($token !== '') {
+            $args['headers']['Authorization'] = 'Bearer ' . $token;
+        }
+        $response = wp_remote_get($url, $args);
+        if (is_wp_error($response) || (int) wp_remote_retrieve_response_code($response) !== 200) {
+            return '';
+        }
+        // A .sha256 file is typically "<hex>  <filename>"; take the first token.
+        $body = trim((string) wp_remote_retrieve_body($response));
+        $first = preg_split('/\s+/', $body)[0] ?? '';
+        return is_string($first) ? $first : '';
+    }
+
+    private function rememberVerificationStatus(string $status): void
+    {
+        if (function_exists('set_site_transient')) {
+            set_site_transient($this->transientKey . '_verify', $status, self::POSITIVE_CACHE_TTL);
+        }
     }
 
     /**
@@ -303,9 +490,80 @@ final class GitHubUpdater
         return is_array($data) ? $data : null;
     }
 
+    // ------------------------------------------------------------------
+    // Admin UI surface
+    // ------------------------------------------------------------------
+
+    public function installedVersion(): string
+    {
+        return $this->version;
+    }
+
+    /**
+     * Clear caches and re-check GitHub, returning the fresh status array.
+     *
+     * @return array<string, mixed>
+     */
+    public function refresh(): array
+    {
+        if (function_exists('delete_site_transient')) {
+            delete_site_transient($this->transientKey);
+            delete_site_transient($this->transientKey . '_verify');
+        }
+
+        return $this->status();
+    }
+
+    /**
+     * Snapshot of the update state for the Updates tab. Uses the cached
+     * release check (does not force a network call).
+     *
+     * @return array<string, mixed>
+     */
+    public function status(): array
+    {
+        $release = $this->fetchRelease();
+        $verification = function_exists('get_site_transient')
+            ? get_site_transient($this->transientKey . '_verify')
+            : false;
+
+        if ($release === null) {
+            return [
+                'installed' => $this->version,
+                'latest' => '',
+                'update_available' => false,
+                'changelog' => '',
+                'release_url' => 'https://github.com/' . $this->gitHubRepo . '/releases',
+                'published_at' => '',
+                'verification' => is_string($verification) ? $verification : 'unknown',
+                'checked' => false,
+            ];
+        }
+
+        $package = $this->selectPackageUrl($release);
+        $digest = $package !== null ? $this->digestForPackage($release, $package) : '';
+
+        return [
+            'installed' => $this->version,
+            'latest' => $this->remoteVersion($release),
+            'update_available' => $this->isNewer($release),
+            'changelog' => $this->renderChangelog($release),
+            'release_url' => (string) ($release['html_url'] ?? ('https://github.com/' . $this->gitHubRepo)),
+            'published_at' => (string) ($release['published_at'] ?? ''),
+            'verification' => is_string($verification) && $verification !== ''
+                ? $verification
+                : ($digest !== '' ? 'verifiable' : 'unverified'),
+            'checked' => true,
+        ];
+    }
+
     private function gitHubToken(): string
     {
+        // Precedence: constant > stored setting (then the filter may override).
         $token = defined('OXYAI_OXYGEN_GITHUB_TOKEN') ? (string) OXYAI_OXYGEN_GITHUB_TOKEN : '';
+        if ($token === '' && $this->settings !== null) {
+            $token = $this->settings->getSecret('github_token');
+        }
         if (!function_exists('apply_filters')) {
             return $token;
         }
