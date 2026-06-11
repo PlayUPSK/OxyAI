@@ -298,33 +298,6 @@
     });
   }
 
-  function randomToken() {
-    const bytes = new Uint8Array(24);
-    window.crypto.getRandomValues(bytes);
-    return "oxyai_" + Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  }
-
-  function syncCodexEndpoint() {
-    const target = $("oxyai-codex-url");
-    if (!target) return;
-    const base = target.getAttribute("data-base-url") || "";
-    target.textContent = base;
-  }
-
-  function regenerateToken() {
-    const token = $("oxyai-mcp-token");
-    if (!token) return;
-    token.value = randomToken();
-    setStatus("New MCP token generated — save setup to keep it.", "success");
-  }
-
-  async function copyCodexUrl() {
-    const value = $("oxyai-codex-url")?.textContent || "";
-    if (!value) return;
-    await navigator.clipboard.writeText(value);
-    setStatus("MCP endpoint copied. Configure the token as x-oxyai-token or Authorization: Bearer.", "success");
-  }
-
   // ===== ACTIONS =====
 
   function renderPreview(data) {
@@ -437,21 +410,91 @@
     );
   }
 
-  // ===== MODAL =====
+  // ===== CONNECT TAB =====
 
-  function openSetup() {
-    const modal = $("oxyai-setup-modal");
-    if (!modal) return;
-    modal.hidden = false;
-    document.body.style.overflow = "hidden";
-    modal.querySelector("input, select, textarea")?.focus({ preventScroll: true });
+  const TOKEN_PLACEHOLDER = "<your-token>";
+
+  async function copyText(text, message) {
+    if (!text) return;
+    await navigator.clipboard.writeText(text);
+    setStatus(message || strings.copied || "Copied to clipboard.", "success");
   }
 
-  function closeSetup() {
-    const modal = $("oxyai-setup-modal");
-    if (!modal) return;
-    modal.hidden = true;
-    document.body.style.overflow = "";
+  function tokenEl() {
+    return $("oxyai-mcp-token");
+  }
+
+  function revealedToken() {
+    const el = tokenEl();
+    return el && el.getAttribute("data-revealed") === "true"
+      ? el.getAttribute("data-token") || ""
+      : "";
+  }
+
+  function setupCopyButtons() {
+    // Generic copy: copies textContent of the referenced element.
+    $$("[data-ox-copy]").forEach((button) => {
+      button.addEventListener("click", function () {
+        const target = $(button.getAttribute("data-ox-copy-target") || "");
+        copyText(target ? target.textContent || "" : "", "Endpoint copied.").catch(
+          (error) => setStatus(error?.message || "Copy failed.", "error")
+        );
+      });
+    });
+  }
+
+  function setupToken() {
+    const el = tokenEl();
+    if (!el) return;
+    const full = el.getAttribute("data-token") || "";
+    const masked = el.getAttribute("data-masked") || "";
+
+    $$("[data-ox-token-reveal]").forEach((button) => {
+      button.addEventListener("click", function () {
+        const revealed = el.getAttribute("data-revealed") === "true";
+        const next = !revealed;
+        el.setAttribute("data-revealed", next ? "true" : "false");
+        el.textContent = next ? full : masked;
+        button.setAttribute("aria-pressed", next ? "true" : "false");
+        button.textContent = next ? "Hide" : "Reveal";
+        renderSnippets();
+      });
+    });
+
+    $$("[data-ox-token-copy]").forEach((button) => {
+      button.addEventListener("click", function () {
+        copyText(full, "Token copied.").catch((error) =>
+          setStatus(error?.message || "Copy failed.", "error")
+        );
+      });
+    });
+  }
+
+  // Re-interpolate the real token into every snippet when revealed.
+  function renderSnippets() {
+    const token = revealedToken();
+    $$("[data-ox-snippet]").forEach((card) => {
+      const pre = card.querySelector("[data-ox-snippet-template]");
+      if (!pre) return;
+      const template = pre.getAttribute("data-ox-snippet-template") || "";
+      const filled = token ? template.split(TOKEN_PLACEHOLDER).join(token) : template;
+      const code = pre.querySelector("code") || pre;
+      code.textContent = filled;
+    });
+  }
+
+  function setupSnippets() {
+    $$("[data-ox-snippet]").forEach((card) => {
+      const copyBtn = card.querySelector("[data-ox-snippet-copy]");
+      const pre = card.querySelector("[data-ox-snippet-template]");
+      if (!copyBtn || !pre) return;
+      copyBtn.addEventListener("click", function () {
+        const code = pre.querySelector("code") || pre;
+        copyText(code.textContent || "", "Snippet copied.").catch((error) =>
+          setStatus(error?.message || "Copy failed.", "error")
+        );
+      });
+    });
   }
 
   // ===== HELPERS =====
@@ -497,8 +540,10 @@
     bind("oxyai-load-pages", loadPages);
     bind("oxyai-apply-page", function () { return applyToPage(false); });
     bind("oxyai-dry-run-page", function () { return applyToPage(true); });
-    bind("oxyai-regenerate-token", regenerateToken);
-    bind("oxyai-copy-codex-url", copyCodexUrl);
+    setupCopyButtons();
+    setupToken();
+    setupSnippets();
+    renderSnippets();
 
     $("oxyai-clear-prompt")?.addEventListener("click", function () {
       if ($("oxyai-prompt")) $("oxyai-prompt").value = "";
@@ -533,14 +578,8 @@
       });
     });
 
-    // Setup modal
+    // Provider field toggling (Settings tab)
     $("oxyai-provider-select")?.addEventListener("change", syncProviderFields);
-    $$("[data-ox-open-setup]").forEach((button) => {
-      button.addEventListener("click", openSetup);
-    });
-    $$("[data-ox-close-setup]").forEach((button) => {
-      button.addEventListener("click", closeSetup);
-    });
     // Builder shortcut button
     $$("[data-ox-shortcut]").forEach((button) => {
       button.addEventListener("click", async function () {
@@ -551,16 +590,6 @@
           setStatus(error?.message || "Failed to copy shortcut.", "error");
         }
       });
-    });
-
-    // Esc closes modal
-    document.addEventListener("keydown", function (event) {
-      if (event.key === "Escape") {
-        const modal = $("oxyai-setup-modal");
-        if (modal && !modal.hidden) {
-          closeSetup();
-        }
-      }
     });
 
     // Cmd/Ctrl+Enter submits generate in generate mode
@@ -575,7 +604,6 @@
     setMode("generate");
     setOperation("append");
     syncProviderFields();
-    syncCodexEndpoint();
     renderAudit({});
   });
 })();
