@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 $oxyaiOxygenExpectedConstants = [
-    'OXYAI_OXYGEN_VERSION' => '0.5.0',
+    'OXYAI_OXYGEN_VERSION' => '0.6.0',
     'OXYAI_OXYGEN_PATH' => plugin_dir_path(__FILE__),
     'OXYAI_OXYGEN_URL' => plugin_dir_url(__FILE__),
     'OXYAI_OXYGEN_OPTION' => 'oxyai_oxygen_settings',
