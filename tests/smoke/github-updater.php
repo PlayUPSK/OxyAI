@@ -211,6 +211,110 @@ $fetchedRelease = $fetchRelease->invoke($updater);
 $check(($fetchedRelease['tag_name'] ?? '') === 'v0.5.0', 'successful release lookup returns payload');
 $check(($githubUpdaterSetTransientCalls[0]['expiration'] ?? 0) === 21600, 'successful release lookup keeps six-hour cache TTL');
 
+// ---- checksum verification: pure helpers ----
+$tmp = tempnam(sys_get_temp_dir(), 'oxyai_zip_');
+file_put_contents($tmp, 'pretend-zip-bytes');
+$realDigest = hash('sha256', 'pretend-zip-bytes');
+$check($updater->verifyChecksum($tmp, $realDigest) === true, 'verifyChecksum passes for a matching sha256');
+$check($updater->verifyChecksum($tmp, 'sha256:' . $realDigest) === true, 'verifyChecksum accepts the sha256: prefixed form');
+$check($updater->verifyChecksum($tmp, strtoupper($realDigest)) === true, 'verifyChecksum is case-insensitive');
+$check($updater->verifyChecksum($tmp, str_repeat('0', 64)) === false, 'verifyChecksum fails for a mismatched digest');
+$check($updater->verifyChecksum($tmp, '') === false, 'verifyChecksum fails for an absent digest');
+$check($updater->verifyChecksum('/no/such/file', $realDigest) === false, 'verifyChecksum fails for a missing file');
+@unlink($tmp);
+
+// ---- digest resolution from a release payload ----
+$assetUrl = 'https://github.com/PlayUPSK/OxyAI/releases/download/v0.5.0/oxyai-0.5.0.zip';
+$releaseWithDigest = [
+    'tag_name' => 'v0.5.0',
+    'assets' => [
+        ['name' => 'oxyai-0.5.0.zip', 'browser_download_url' => $assetUrl, 'digest' => 'sha256:' . $realDigest],
+    ],
+];
+$check($updater->digestForPackage($releaseWithDigest, $assetUrl) === 'sha256:' . $realDigest, 'digestForPackage returns the asset digest');
+
+$releaseNoDigest = [
+    'tag_name' => 'v0.5.0',
+    'assets' => [
+        ['name' => 'oxyai-0.5.0.zip', 'browser_download_url' => $assetUrl],
+    ],
+];
+$check($updater->digestForPackage($releaseNoDigest, $assetUrl) === '', 'digestForPackage returns empty when no digest and no sidecar');
+
+$releaseSidecar = [
+    'tag_name' => 'v0.5.0',
+    'assets' => [
+        ['name' => 'oxyai-0.5.0.zip', 'browser_download_url' => $assetUrl],
+        ['name' => 'oxyai-0.5.0.zip.sha256', 'browser_download_url' => 'https://example.test/oxyai-0.5.0.zip.sha256'],
+    ],
+];
+// fetchSidecarDigest uses wp_remote_get, stubbed to return $githubUpdaterRemoteResponse.
+$githubUpdaterRemoteResponse = ['response' => ['code' => 200], 'body' => $realDigest . '  oxyai-0.5.0.zip'];
+$check($updater->digestForPackage($releaseSidecar, $assetUrl) === $realDigest, 'digestForPackage reads a sidecar .sha256 asset');
+
+// ---- token + auto-update read from settings with constant/filter precedence ----
+$GLOBALS['oxyaiSmokeUpdaterOptions'] = [];
+if (!function_exists('get_option')) {
+    function get_option(string $name, $default = false)
+    {
+        return $GLOBALS['oxyaiSmokeUpdaterOptions'][$name] ?? $default;
+    }
+}
+if (!function_exists('update_option')) {
+    function update_option(string $name, $value, $autoload = null): bool
+    {
+        $GLOBALS['oxyaiSmokeUpdaterOptions'][$name] = $value;
+        return true;
+    }
+}
+if (!function_exists('home_url')) {
+    function home_url(string $path = ''): string
+    {
+        return 'https://example.test' . $path;
+    }
+}
+if (!function_exists('sanitize_text_field')) {
+    function sanitize_text_field(string $value): string
+    {
+        return trim($value);
+    }
+}
+if (!defined('OXYAI_OXYGEN_OPTION')) {
+    define('OXYAI_OXYGEN_OPTION', 'oxyai_oxygen_settings');
+}
+
+require_once __DIR__ . '/../../src/Settings/SettingsRepository.php';
+
+$settings = new OxyAI\Oxygen\Settings\SettingsRepository();
+$settings->set('github_token', 'settings-token-xyz');
+$settings->set('auto_update_enabled', true);
+
+$settingsUpdater = new GitHubUpdater(
+    '/var/www/wp-content/plugins/oxyai/oxyai-oxygen.php',
+    'PlayUPSK/OxyAI',
+    '0.4.2',
+    '/^oxyai-[0-9][0-9A-Za-z.\-]*\.zip$/',
+    $settings
+);
+
+$tokenMethod = new ReflectionMethod($settingsUpdater, 'gitHubToken');
+$tokenMethod->setAccessible(true);
+$check($tokenMethod->invoke($settingsUpdater) === 'settings-token-xyz', 'updater reads github token from settings when no constant/filter');
+
+// filter overrides the stored setting
+$githubUpdaterTestFilters['token'] = 'filter-token-overrides';
+$check($tokenMethod->invoke($settingsUpdater) === 'filter-token-overrides', 'filter token overrides the settings token');
+unset($githubUpdaterTestFilters['token']);
+
+// auto-update default comes from settings when no constant/filter
+$check($settingsUpdater->enableAutoUpdate(false, $pluginItem) === true, 'auto-update defaults to the stored setting (enabled)');
+$settings->set('auto_update_enabled', false);
+$check($settingsUpdater->enableAutoUpdate(true, $pluginItem) === false, 'auto-update default follows the stored setting (disabled)');
+// explicit filter still wins
+$githubUpdaterTestFilters['auto_update'] = true;
+$check($settingsUpdater->enableAutoUpdate(false, $pluginItem) === true, 'auto-update filter overrides the stored setting');
+unset($githubUpdaterTestFilters['auto_update']);
+
 if ($failures > 0) {
     fwrite(STDERR, "github-updater FAILED with {$failures} failure(s)\n");
     exit(1);

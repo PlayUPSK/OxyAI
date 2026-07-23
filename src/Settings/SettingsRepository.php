@@ -22,7 +22,19 @@ final class SettingsRepository
             'compatible_model' => 'local-model',
             'history_enabled' => false,
             'mcp_token' => '',
+            'github_token' => '',
+            'auto_update_enabled' => false,
         ];
+    }
+
+    /**
+     * Keys whose values are encrypted at rest and must never be echoed raw.
+     *
+     * @return list<string>
+     */
+    public function secretKeys(): array
+    {
+        return ['openai_api_key', 'anthropic_api_key', 'compatible_api_key', 'github_token'];
     }
 
     public function register(): void
@@ -70,12 +82,13 @@ final class SettingsRepository
             $sanitized[$key] = isset($input[$key]) ? sanitize_text_field((string) $input[$key]) : (string) $current[$key];
         }
 
-        foreach (['openai_api_key', 'anthropic_api_key', 'compatible_api_key'] as $key) {
+        foreach ($this->secretKeys() as $key) {
             $value = isset($input[$key]) ? trim((string) $input[$key]) : '';
             $sanitized[$key] = $value === '' ? (string) $current[$key] : $this->encrypt($value);
         }
 
         $sanitized['history_enabled'] = !empty($input['history_enabled']);
+        $sanitized['auto_update_enabled'] = !empty($input['auto_update_enabled']);
         if ($sanitized['mcp_token'] === '') {
             $sanitized['mcp_token'] = $this->generateMcpToken();
         }
@@ -107,6 +120,59 @@ final class SettingsRepository
     public function generateMcpToken(): string
     {
         return 'oxyai_' . bin2hex(random_bytes(24));
+    }
+
+    /**
+     * Persist a single option without disturbing the rest, encrypting the
+     * value first when the key is a secret.
+     *
+     * @param mixed $value
+     */
+    public function set(string $key, $value): void
+    {
+        $settings = $this->all();
+        $settings[$key] = in_array($key, $this->secretKeys(), true)
+            ? $this->encrypt(trim((string) $value))
+            : $value;
+        update_option(OXYAI_OXYGEN_OPTION, $settings, false);
+    }
+
+    /**
+     * Regenerate, persist, and return a fresh MCP token.
+     */
+    public function regenerateMcpToken(): string
+    {
+        $token = $this->generateMcpToken();
+        $this->set('mcp_token', $token);
+
+        return $token;
+    }
+
+    /**
+     * Produce a masked preview of a secret for display, never the full value.
+     * Example: "sk-ab••••wxyz". Short or empty secrets collapse to dots only.
+     */
+    public function mask(string $secret): string
+    {
+        $secret = trim($secret);
+        if ($secret === '') {
+            return '';
+        }
+
+        $length = strlen($secret);
+        if ($length <= 8) {
+            return str_repeat('•', max($length, 4));
+        }
+
+        return substr($secret, 0, 4) . '••••' . substr($secret, -4);
+    }
+
+    /**
+     * Masked preview of a stored (encrypted) secret option.
+     */
+    public function maskedSecret(string $key): string
+    {
+        return $this->mask($this->getSecret($key));
     }
 
     private function encrypt(string $plain): string

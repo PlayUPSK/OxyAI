@@ -1182,3 +1182,244 @@
   overflow: hidden;
   white-space: nowrap;
 }
+
+/* ===== TOP-LEVEL NAV (Console / Settings / Connect / Updates) ===== */
+
+.ox-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 20px;
+  padding: 4px;
+  border: 1px solid var(--ox-border);
+  border-radius: var(--ox-radius);
+  background: var(--ox-surface);
+  box-shadow: var(--ox-shadow-xs);
+}
+
+.ox-nav__tab {
+  padding: 9px 16px;
+  border-radius: var(--ox-radius-sm);
+  color: var(--ox-text-soft);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color 140ms var(--ox-ease), color 140ms var(--ox-ease);
+}
+
+.ox-nav__tab:hover {
+  background: var(--ox-surface-alt);
+  color: var(--ox-text);
+}
+
+.ox-nav__tab.is-active {
+  background: var(--ox-brand-soft);
+  color: var(--ox-brand-strong);
+}
+
+.ox-nav__tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--ox-brand-ring);
+}
+
+.ox-section[hidden] {
+  display: none;
+}
+
+.ox-layout--wide {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* ===== FLASH NOTICE ===== */
+
+.ox-flash {
+  margin-bottom: 18px;
+  padding: 10px 14px;
+  border: 1px solid var(--ox-success);
+  border-radius: var(--ox-radius-sm);
+  background: var(--ox-success-soft);
+  color: var(--ox-success);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ===== SETTINGS FORM CARD ===== */
+
+.ox-form .ox-card__body {
+  display: grid;
+  gap: 14px;
+}
+
+.ox-rule {
+  margin: 6px 0;
+  border: 0;
+  border-top: 1px solid var(--ox-border);
+}
+
+.ox-field__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+}
+
+/* ===== REQUIREMENTS CHECKLIST ===== */
+
+.ox-checklist {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ox-checklist__item {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  border: 1px solid var(--ox-border);
+  border-radius: var(--ox-radius-sm);
+  background: var(--ox-surface-inset);
+}
+
+.ox-checklist__label {
+  display: grid;
+  gap: 1px;
+}
+
+.ox-checklist__label strong {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ox-checklist__detail {
+  color: var(--ox-text-soft);
+  font-size: 12px;
+}
+
+.ox-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ox-badge--pass {
+  background: var(--ox-success-soft);
+  color: var(--ox-success);
+}
+
+.ox-badge--fail {
+  background: var(--ox-danger-soft);
+  color: var(--ox-danger);
+}
+
+/* ===== CONNECT SNIPPETS ===== */
+
+.ox-snippets {
+  display: grid;
+  gap: 12px;
+}
+
+.ox-snippet {
+  border: 1px solid var(--ox-border);
+  border-radius: var(--ox-radius-sm);
+  background: var(--ox-surface-inset);
+  overflow: hidden;
+}
+
+.ox-snippet__head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--ox-border);
+}
+
+.ox-snippet__label {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ox-snippet__note {
+  display: block;
+  color: var(--ox-text-soft);
+  font-size: 12px;
+}
+
+.ox-snippet__code {
+  margin: 0;
+  padding: 12px 14px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: var(--ox-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.ox-snippet__code code {
+  font: inherit;
+  color: inherit;
+  background: none;
+}
+
+/* ===== UPDATES META ===== */
+
+.ox-meta {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.ox-meta__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--ox-border);
+}
+
+.ox-meta__row dt {
+  flex: 0 0 180px;
+  margin: 0;
+  color: var(--ox-text-soft);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.ox-meta__row dd {
+  margin: 0;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.ox-changelog {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ox-text-soft);
+}
+
+.ox-changelog h1,
+.ox-changelog h2,
+.ox-changelog h3 {
+  color: var(--ox-text);
+  font-size: 14px;
+  margin: 12px 0 6px;
+}
+
+.ox-changelog code {
+  font-family: var(--ox-mono);
+  font-size: 12px;
+}
