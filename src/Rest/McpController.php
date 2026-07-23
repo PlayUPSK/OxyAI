@@ -17,6 +17,7 @@ use OxyAI\Oxygen\Oxygen\OxygenPageMutationService;
 use OxyAI\Oxygen\Oxygen\SelectorRegistrationService;
 use OxyAI\Oxygen\Presets\PresetStore;
 use OxyAI\Oxygen\Security\CapabilityService;
+use OxyAI\Oxygen\Security\RateLimiter;
 use OxyAI\Oxygen\Source\SourceBundle;
 use WP_Error;
 use WP_REST_Request;
@@ -38,11 +39,25 @@ final class McpController
         private readonly OxygenElementCapabilityService $elementCapabilities = new OxygenElementCapabilityService(),
         private readonly BuilderInsertionService $insertionService = new BuilderInsertionService(),
         private ?PromptInstructionService $instructions = null,
-        private ?PageContextService $pages = null
+        private ?PageContextService $pages = null,
+        private ?RateLimiter $rateLimiter = null
     ) {
         $this->instructions = $this->instructions ?: new PromptInstructionService($this->presets, $this->inspirations, $this->elementCapabilities);
         $this->pages = $this->pages ?: new PageContextService();
+        $this->rateLimiter = $this->rateLimiter ?: new RateLimiter();
     }
+
+    /**
+     * Live (non-dryRun) write tools subject to rate limiting.
+     */
+    private const WRITE_TOOLS = [
+        'apply_html_to_oxygen_page',
+        'apply_oxygen_json_to_page',
+        'apply_oxygen_operations',
+        'patch_oxygen_node',
+        'upsert_css_block',
+        'remove_css_block',
+    ];
 
     public function register(): void
     {
@@ -256,6 +271,11 @@ final class McpController
      */
     private function callTool(string $tool, array $input)
     {
+        $rateLimited = $this->enforceWriteRateLimit($tool, $input);
+        if ($rateLimited !== null) {
+            return $rateLimited;
+        }
+
         return match ($tool) {
             'get_prompt_instructions' => ['success' => true, 'instructions' => $this->instructions->getInstructions()],
             'list_oxygen_pages' => ['success' => true, 'pages' => $this->pages->listPages((string) ($input['search'] ?? ''))],
@@ -267,6 +287,12 @@ final class McpController
             'apply_html_to_oxygen_page' => $this->applyHtmlToPage($input),
             'apply_oxygen_json_to_page' => $this->applyOxygenJsonToPage($input),
             'apply_oxygen_operations' => $this->applyOxygenOperations($input),
+            'patch_oxygen_node' => $this->pageMutations->patchNode(
+                (int) ($input['postId'] ?? $input['id'] ?? 0),
+                (int) ($input['nodeId'] ?? 0),
+                is_array($input['data'] ?? null) ? $input['data'] : [],
+                $this->writeOptions($input)
+            ),
             'upsert_css_block' => $this->pageMutations->upsertCssBlock(
                 (int) ($input['postId'] ?? $input['id'] ?? 0),
                 (string) ($input['css'] ?? ''),
@@ -337,14 +363,14 @@ final class McpController
                 'notes' => ['type' => 'string'],
                 'options' => ['type' => 'object'],
             ], ['postId', 'html']),
-            $this->tool('get_oxygen_tree', 'Read the persisted Oxygen page tree. Returns a compact OUTLINE by default ({id,type,label,parentId,childIds,classes}) with design data and inline SVG stripped - far cheaper than the full tree. Pass view:"full" for the raw tree, nodeId to focus a single subtree, depth to limit outline depth, includeBackups:true to also return backup payloads.', [
+            $this->tool('get_oxygen_tree', 'STEP 1 of the edit workflow. Read the persisted Oxygen page tree. Returns a compact OUTLINE by default ({id,type,label,parentId,childIds,classes}) with design data and inline SVG stripped - 10-20x cheaper than the full tree. NEVER round-trip the full tree to make edits. view:"html" returns a type-aware readable HTML reconstruction (each element tagged data-node-id) - the cheapest way to "see" a page layout. view:"full" returns the raw tree but is size-gated: payloads over 50KB fall back to the outline with summarized:true, so scope with nodeId/depth or use view:"html". nodeId focuses a single subtree; depth limits outline/html depth; includeBackups:true also returns backup payloads.', [
                 'postId' => ['type' => 'integer'],
-                'view' => ['type' => 'string', 'description' => 'outline (default) or full.'],
-                'nodeId' => ['type' => 'integer', 'description' => 'Focus the outline/tree on a single node and its descendants.'],
-                'depth' => ['type' => 'integer', 'description' => 'Limit outline depth from the root (or focused node).'],
+                'view' => ['type' => 'string', 'description' => 'outline (default), html (type-aware readable reconstruction), or full (raw, size-gated at 50KB).'],
+                'nodeId' => ['type' => 'integer', 'description' => 'Focus the outline/tree/html on a single node and its descendants.'],
+                'depth' => ['type' => 'integer', 'description' => 'Limit outline/html depth from the root (or focused node).'],
                 'includeBackups' => ['type' => 'boolean', 'description' => 'Include full restore backup payloads. Defaults false (only backupCount is returned).'],
             ], ['postId']),
-            $this->tool('find_oxygen_nodes', 'Find nodes in the persisted Oxygen tree by filter and return compact outline entries (id, type, label, parentId, childIds). Avoids fetching and scanning the whole tree.', [
+            $this->tool('find_oxygen_nodes', 'STEP 2 of the edit workflow. Find nodes in the persisted Oxygen tree by filter and return compact outline entries (id, type, label, parentId, childIds). Use this to locate the nodeId(s) you want to edit instead of fetching and scanning the whole tree.', [
                 'postId' => ['type' => 'integer'],
                 'type' => ['type' => 'string', 'description' => 'Case-insensitive substring match against the full element type, e.g. "MenuCustomArea" or "TextLink".'],
                 'textContains' => ['type' => 'string', 'description' => 'Match nodes whose text/url/icon label contains this string.'],
@@ -376,13 +402,20 @@ final class McpController
                 'recompile' => ['type' => 'boolean', 'description' => 'After a live write, force a full CSS recompile.'],
                 'registerSelectors' => ['type' => 'boolean', 'description' => 'Register and attach semantic classes as Oxygen selector IDs. Defaults true.'],
             ], ['postId']),
-            $this->tool('apply_oxygen_operations', 'WRITES TO THE LIVE PAGE (unless dryRun) - apply a sequence of small node operations to the existing tree in ONE call and ONE backup. Far cheaper than resending whole subtrees. Each op is a map: {op:"update_node",targetNodeId,set:{"data.properties.content.content.text":"..."},unset:["data.properties..."]}; {op:"set_node_type",targetNodeId,type,set?,unset?}; {op:"delete_node",targetNodeId}; {op:"move_node",nodeId,toParent,index?}; {op:"insert_node",parentId,node,index?}; {op:"upsert_css",key,css}; {op:"remove_css",key}. set/unset use dot-paths into the node. Returns idMap + changedNodeIds; dryRun returns the outline.', [
+            $this->tool('apply_oxygen_operations', 'STEP 4 (multi-op). WRITES TO THE LIVE PAGE (unless dryRun) - apply a sequence of small node operations to the existing tree in ONE call and ONE backup. Far cheaper than resending whole subtrees, and counts as a single write against the rate limit. Each op is a map: {op:"patch_node",targetNodeId,data:{...}} (recursive deep-merge); {op:"update_node",targetNodeId,set:{"data.properties.content.content.text":"..."},unset:["data.properties..."]}; {op:"set_node_type",targetNodeId,type,set?,unset?}; {op:"delete_node",targetNodeId}; {op:"move_node",nodeId,toParent,index?}; {op:"insert_node",parentId,node,index?}; {op:"upsert_css",key,css}; {op:"remove_css",key}. set/unset use dot-paths into the node. Writes are validated against the element capability registry: a known element type written to a contradictory design path (e.g. flat design.padding, or an unsupported bucket) or inserted without its required content paths is rejected with a 422-style error naming the correct path; unknown/runtime element types are allowed with mcpWarnings. Call list_oxygen_element_capabilities(elementType) before setting properties on an unfamiliar type. Returns idMap + changedNodeIds + changedPaths; dryRun returns the outline.', [
                 'postId' => ['type' => 'integer'],
                 'ops' => ['type' => 'array', 'description' => 'Ordered list of node operations (see tool description).'],
                 'dryRun' => ['type' => 'boolean', 'description' => 'Return the proposed outline + changedNodeIds without saving.'],
                 'dryRunView' => ['type' => 'string', 'description' => 'On dryRun: "outline" (default) or "full" to also return the whole proposed tree.'],
                 'recompile' => ['type' => 'boolean', 'description' => 'After a live write, force a full CSS recompile.'],
             ], ['postId', 'ops']),
+            $this->tool('patch_oxygen_node', 'STEP 4 (single node) and the preferred way to edit ONE element. WRITES TO THE LIVE PAGE (unless dryRun). Deep-merges a partial data object into a single node: scalars and lists replace, associative objects merge key-by-key, the node id and all untouched properties are preserved. Validated against the element capability registry (same guardrail as apply_oxygen_operations): contradictory design paths or value-shape mismatches on a known element type are rejected with a 422 naming the correct path; unknown types pass with mcpWarnings. Call list_oxygen_element_capabilities(elementType) first when unsure of the data shape. Returns a compact confirmation only: {success,nodeId,changedPaths[],backupId} - never the tree.', [
+                'postId' => ['type' => 'integer'],
+                'nodeId' => ['type' => 'integer', 'description' => 'Id of the node to patch (from get_oxygen_tree/find_oxygen_nodes).'],
+                'data' => ['type' => 'object', 'description' => 'Partial node.data object to deep-merge, e.g. {"properties":{"content":{"content":{"text":"New"}}}}.'],
+                'dryRun' => ['type' => 'boolean', 'description' => 'Validate and report changedPaths without saving.'],
+                'recompile' => ['type' => 'boolean', 'description' => 'After a live write, force a full CSS recompile.'],
+            ], ['postId', 'nodeId', 'data']),
             $this->tool('upsert_css_block', 'WRITES TO THE LIVE PAGE (unless dryRun) - create or replace a keyed CssCode block on the page. Idempotent: re-running with the same key updates the existing block instead of stacking new nodes. Use for custom CSS overrides scoped by id-independent selectors. Pair with remove_css_block to revert.', [
                 'postId' => ['type' => 'integer'],
                 'key' => ['type' => 'string', 'description' => 'Stable identifier for this block ([A-Za-z0-9_-], max 64). Re-using it replaces the previous block.'],
@@ -437,7 +470,7 @@ final class McpController
             ]),
             $this->tool('list_design_presets', 'List design presets available to OxyAI.', []),
             $this->tool('list_site_inspirations', 'List first-party OxyAI site inspiration directions for generation prompts.', []),
-            $this->tool('list_oxygen_element_capabilities', 'List Oxygen 6 and Breakdance Elements for Oxygen styling capabilities, auto-mapping rules, required content paths, and runtime element catalog. Use this before deciding which CSS can become native design properties or before hand-authoring any Oxygen/EssentialElements JSON.', [
+            $this->tool('list_oxygen_element_capabilities', 'STEP 3 of the edit workflow - ALWAYS call this (with elementType) before setting design/content properties on an element type you have not already inspected this session. Returns that element\'s supported design buckets, native CSS properties, native value shapes, required content paths, and a concrete exampleNode showing the exact data shape. These are the same rules the write validator enforces, so checking here first avoids 422 rejections. Omit elementType for the full catalog (large).', [
                 'elementType' => ['type' => 'string', 'description' => 'Optional full element type, for example OxygenElements\\\\Container or EssentialElements\\\\Button.'],
             ]),
         ];
@@ -709,6 +742,26 @@ final class McpController
         }
 
         return $filter;
+    }
+
+    /**
+     * Apply the sliding-window write rate limit to live (non-dryRun) write
+     * tools. Returns a 429-style WP_Error when exhausted, else null.
+     *
+     * @param array<string, mixed> $input
+     */
+    private function enforceWriteRateLimit(string $tool, array $input): ?WP_Error
+    {
+        if (!in_array($tool, self::WRITE_TOOLS, true) || $this->rateLimiter === null) {
+            return null;
+        }
+
+        $dryRun = $input['dryRun'] ?? ($input['options']['dryRun'] ?? false);
+        if (!empty($dryRun)) {
+            return null;
+        }
+
+        return $this->rateLimiter->hit('mcp');
     }
 
     /**

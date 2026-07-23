@@ -24,6 +24,7 @@ if (!is_string($source)) {
 foreach ([
     'find_oxygen_nodes',
     'apply_oxygen_operations',
+    'patch_oxygen_node',
     'upsert_css_block',
     'remove_css_block',
     'list_css_blocks',
@@ -33,8 +34,16 @@ foreach ([
 
 // ... and routed in callTool().
 $check(str_contains($source, "'apply_oxygen_operations' => \$this->applyOxygenOperations("), 'apply_oxygen_operations routed');
+$check(str_contains($source, "'patch_oxygen_node' => \$this->pageMutations->patchNode("), 'patch_oxygen_node routed');
 $check(str_contains($source, "'find_oxygen_nodes' => \$this->pageMutations->findNodes("), 'find_oxygen_nodes routed');
 $check(str_contains($source, "'upsert_css_block' => \$this->pageMutations->upsertCssBlock("), 'upsert_css_block routed');
+
+// Write rate limiting is enforced on live write tools.
+$check(str_contains($source, 'enforceWriteRateLimit'), 'write rate limit helper present');
+$check(str_contains($source, 'RateLimiter'), 'RateLimiter wired into controller');
+
+// html view is documented on get_oxygen_tree.
+$check(str_contains($source, 'view:"html"') || str_contains($source, "view:'html'") || str_contains($source, 'html (type-aware'), 'html view documented on get_oxygen_tree');
 
 // get_oxygen_tree forwards view options.
 $check(str_contains($source, '$this->treeViewOptions($input)'), 'get_oxygen_tree forwards view options');

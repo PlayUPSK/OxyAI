@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OxyAI\Oxygen\Oxygen;
 
+use OxyAI\Oxygen\Codex\ElementWriteValidator;
 use WP_Error;
 
 /**
@@ -186,6 +187,203 @@ trait OxygenTreeToolsTrait
     }
 
     // ------------------------------------------------------------------
+    // #4 Type-aware readable HTML reconstruction (pure)
+    // ------------------------------------------------------------------
+
+    /**
+     * Reconstruct a readable, type-aware HTML view of the tree. NOT a real
+     * render: each node emits a representative tag annotated with
+     * data-node-id="N". The cheapest way for an agent to "see" a page.
+     *
+     * @param array<string, mixed> $documentTree
+     * @param array<string, mixed> $options nodeId?:int, depth?:int
+     * @return array{html: string, found: bool, nodeId?: int}
+     */
+    public function renderTreeHtml(array $documentTree, array $options = []): array
+    {
+        $tree = $this->normalizeDocumentTree($documentTree);
+        $root = is_array($tree['root'] ?? null) ? $tree['root'] : [];
+
+        $focusId = isset($options['nodeId']) && is_numeric($options['nodeId']) ? (int) $options['nodeId'] : null;
+        $maxDepth = isset($options['depth']) && is_numeric($options['depth']) ? max(0, (int) $options['depth']) : null;
+
+        $start = $root;
+        if ($focusId !== null) {
+            $parent = null;
+            $found = $this->findNodeCopy($root, $focusId, $parent);
+            if ($found === null) {
+                return ['html' => '', 'found' => false, 'nodeId' => $focusId];
+            }
+            $start = $found;
+        }
+
+        return ['html' => $this->renderNodeHtml($start, 0, $maxDepth), 'found' => true];
+    }
+
+    /**
+     * @param array<string, mixed> $node
+     */
+    private function renderNodeHtml(array $node, int $depth, ?int $maxDepth): string
+    {
+        $type = (string) ($node['data']['type'] ?? '');
+        $short = $this->shortType($type);
+        $id = isset($node['id']) && is_numeric($node['id']) ? (int) $node['id'] : 0;
+        $indent = str_repeat('  ', $depth);
+
+        [$tag, $attrs, $void] = $this->htmlTagFor($node, $short);
+        $idAttr = ' data-node-id="' . $id . '"';
+        $typeAttr = $this->isGenericTag($short, $tag) ? ' data-type="' . $this->escAttr($short) . '"' : '';
+
+        if ($void) {
+            return $indent . '<' . $tag . $idAttr . $typeAttr . $attrs . '>' . "\n";
+        }
+
+        $open = $indent . '<' . $tag . $idAttr . $typeAttr . $attrs . '>';
+        $close = '</' . $tag . '>';
+
+        $text = $this->htmlTextPreview($node);
+        $children = is_array($node['children'] ?? null) ? $node['children'] : [];
+        $atDepthLimit = $maxDepth !== null && $depth >= $maxDepth;
+
+        if ($children === [] || $atDepthLimit) {
+            $inner = $text;
+            if ($atDepthLimit && $children !== []) {
+                $inner .= ($inner !== '' ? ' ' : '') . '<!-- ' . count($children) . ' child node(s) -->';
+            }
+            return $open . $inner . $close . "\n";
+        }
+
+        $out = $open . ($text !== '' ? "\n" . $indent . '  ' . $text : '') . "\n";
+        foreach ($children as $child) {
+            if (is_array($child)) {
+                $out .= $this->renderNodeHtml($child, $depth + 1, $maxDepth);
+            }
+        }
+        $out .= $indent . $close . "\n";
+
+        return $out;
+    }
+
+    /**
+     * Map an element node to [tag, extraAttributes, isVoid].
+     *
+     * @param array<string, mixed> $node
+     * @return array{0: string, 1: string, 2: bool}
+     */
+    private function htmlTagFor(array $node, string $short): array
+    {
+        $content = $node['data']['properties']['content']['content'] ?? [];
+        $content = is_array($content) ? $content : [];
+
+        switch ($short) {
+            case 'root':
+                return ['div', '', false];
+            case 'Section':
+                return ['section', '', false];
+            case 'Header':
+                return ['header', '', false];
+            case 'Heading':
+                $level = $this->headingLevel($content);
+                return ['h' . $level, '', false];
+            case 'Text':
+                return ['p', '', false];
+            case 'RichText':
+                return ['div', '', false];
+            case 'Image':
+            case 'Image2':
+                $image = $node['data']['properties']['content']['image'] ?? [];
+                $image = is_array($image) ? $image : [];
+                $src = (string) ($image['url'] ?? ($image['src'] ?? ''));
+                $alt = (string) ($image['alt'] ?? '');
+                $attrs = ($src !== '' ? ' src="' . $this->escAttr($src) . '"' : '') . ' alt="' . $this->escAttr($alt) . '"';
+                return ['img', $attrs, true];
+            case 'Button':
+            case 'TextLink':
+            case 'ContainerLink':
+                $url = (string) ($content['link']['url'] ?? '');
+                return ['a', $url !== '' ? ' href="' . $this->escAttr($url) . '"' : '', false];
+            case 'CssCode':
+                return ['style', '', false];
+            case 'JavaScriptCode':
+                return ['script', '', false];
+            case 'HtmlCode':
+                return ['div', '', false];
+            case 'BasicList':
+                return ['ul', '', false];
+            case 'Container':
+                return ['div', '', false];
+            default:
+                return ['div', '', false];
+        }
+    }
+
+    private function isGenericTag(string $short, string $tag): bool
+    {
+        // Annotate data-type whenever the tag does not uniquely identify the
+        // element (i.e. it collapsed to a generic <div>) and the type is not
+        // already a plain container.
+        return $tag === 'div' && !in_array($short, ['Container', 'root', 'RichText', 'HtmlCode'], true);
+    }
+
+    /**
+     * @param array<string, mixed> $content
+     */
+    private function headingLevel(array $content): int
+    {
+        $tag = $content['tag'] ?? null;
+        if (is_string($tag) && preg_match('/^h([1-6])$/i', trim($tag), $m) === 1) {
+            return (int) $m[1];
+        }
+        $size = $content['size'] ?? null;
+        if (is_string($size) && preg_match('/^h([1-6])$/i', trim($size), $m) === 1) {
+            return (int) $m[1];
+        }
+
+        return 2;
+    }
+
+    /**
+     * @param array<string, mixed> $node
+     */
+    private function htmlTextPreview(array $node): string
+    {
+        $content = $node['data']['properties']['content']['content'] ?? [];
+        $content = is_array($content) ? $content : [];
+
+        $text = null;
+        if (isset($content['text']) && is_string($content['text'])) {
+            $text = wp_strip_all_tags($content['text']);
+        } elseif (isset($content['link']['label']) && is_string($content['link']['label'])) {
+            $text = $content['link']['label'];
+        } elseif (isset($content['shortcode']['full_shortcode']) && is_string($content['shortcode']['full_shortcode'])) {
+            $text = $content['shortcode']['full_shortcode'];
+        } elseif (isset($content['icon']['name']) && is_string($content['icon']['name'])) {
+            $text = 'icon:' . $content['icon']['name'];
+        }
+
+        if ($text === null) {
+            return '';
+        }
+
+        $text = trim(preg_replace('/\s+/', ' ', $text) ?? $text);
+        if ($this->stringLength($text) > 120) {
+            $text = $this->stringSlice($text, 0, 117) . '...';
+        }
+
+        return $this->escText($text);
+    }
+
+    private function escAttr(string $value): string
+    {
+        return str_replace(['&', '"', '<', '>'], ['&amp;', '&quot;', '&lt;', '&gt;'], $value);
+    }
+
+    private function escText(string $value): string
+    {
+        return str_replace(['&', '<', '>'], ['&amp;', '&lt;', '&gt;'], $value);
+    }
+
+    // ------------------------------------------------------------------
     // #6 Find nodes (pure)
     // ------------------------------------------------------------------
 
@@ -275,6 +473,7 @@ trait OxygenTreeToolsTrait
      *
      * Supported ops (each a map with an "op" key):
      *   update_node    {targetNodeId, set?:{path:value}, unset?:[path]}
+     *   patch_node     {targetNodeId, data:{...}}  recursive deep-merge into node.data
      *   set_node_type  {targetNodeId, type, set?, unset?}
      *   delete_node    {targetNodeId}
      *   move_node      {nodeId, toParent, index?}
@@ -284,9 +483,10 @@ trait OxygenTreeToolsTrait
      *
      * @param array<string, mixed> $documentTree
      * @param array<int, array<string, mixed>> $ops
+     * @param ElementWriteValidator|null $validator registry guardrail (#1/#3)
      * @return array<string, mixed>|WP_Error
      */
-    public function applyNodeOperations(array $documentTree, array $ops)
+    public function applyNodeOperations(array $documentTree, array $ops, ?ElementWriteValidator $validator = null)
     {
         if ($ops === []) {
             return new WP_Error('oxyai_no_operations', __('No operations were provided.', 'oxyai-oxygen'), ['status' => 400]);
@@ -295,13 +495,15 @@ trait OxygenTreeToolsTrait
         $tree = $this->normalizeDocumentTree($documentTree);
         $idMap = [];
         $changed = [];
+        $changedPaths = [];
+        $warnings = [];
 
         foreach ($ops as $index => $op) {
             if (!is_array($op)) {
                 return new WP_Error('oxyai_invalid_operation', sprintf(/* translators */ __('Operation %d is not an object.', 'oxyai-oxygen'), (int) $index), ['status' => 400]);
             }
 
-            $result = $this->applySingleNodeOperation($tree, $op, $idMap, $changed, (int) $index);
+            $result = $this->applySingleNodeOperation($tree, $op, $idMap, $changed, (int) $index, $validator, $warnings, $changedPaths);
             if (is_wp_error($result)) {
                 return $result;
             }
@@ -312,7 +514,9 @@ trait OxygenTreeToolsTrait
             'tree' => $this->normalizeDocumentTree($tree),
             'idMap' => $idMap,
             'changedNodeIds' => array_values(array_unique($changed)),
+            'changedPaths' => array_values(array_unique($changedPaths)),
             'opsApplied' => count($ops),
+            'mcpWarnings' => $warnings,
         ];
     }
 
@@ -321,13 +525,54 @@ trait OxygenTreeToolsTrait
      * @param array<string, mixed> $op
      * @param array<int|string, int> $idMap
      * @param array<int, int> $changed
+     * @param array<int, array<string, string>> $warnings
+     * @param array<int, string> $changedPaths
      * @return array<string, mixed>|WP_Error
      */
-    private function applySingleNodeOperation(array $tree, array $op, array &$idMap, array &$changed, int $index)
+    private function applySingleNodeOperation(array $tree, array $op, array &$idMap, array &$changed, int $index, ?ElementWriteValidator $validator = null, array &$warnings = [], array &$changedPaths = [])
     {
         $kind = strtolower(str_replace('-', '_', trim((string) ($op['op'] ?? $op['operation'] ?? ''))));
 
         switch ($kind) {
+            case 'patch_node':
+                $targetId = $this->intOrNull($op['targetNodeId'] ?? $op['nodeId'] ?? null);
+                if ($targetId === null) {
+                    return $this->opError($index, __('targetNodeId is required.', 'oxyai-oxygen'));
+                }
+                $patch = is_array($op['data'] ?? null) ? $op['data'] : (is_array($op['patch'] ?? null) ? $op['patch'] : null);
+                if ($patch === null) {
+                    return $this->opError($index, __('data (partial object) is required for patch_node.', 'oxyai-oxygen'));
+                }
+                $patchError = null;
+                $found = $this->mutateNodeById($tree['root'], $targetId, function (array &$node) use ($patch, $validator, &$warnings, &$changedPaths, &$patchError, $index): void {
+                    $before = is_array($node['data'] ?? null) ? $node['data'] : [];
+                    $merged = $this->deepMerge($before, $patch);
+                    // patch_node must never change the node id.
+                    $candidate = $node;
+                    $candidate['data'] = $merged;
+                    $type = (string) ($merged['type'] ?? ($before['type'] ?? ''));
+                    if ($validator !== null && $type !== '') {
+                        $check = $validator->validateWrite($type, $this->dotPathsFor($patch), $candidate, false);
+                        if (is_wp_error($check)) {
+                            $patchError = $this->opError($index, $check->get_error_message(), (int) ($check->get_error_data()['status'] ?? 422));
+                            return;
+                        }
+                        $warnings = array_merge($warnings, $check['warnings']);
+                    }
+                    $node['data'] = $merged;
+                    foreach ($this->collectMergePaths($patch, 'data') as $p) {
+                        $changedPaths[] = $p;
+                    }
+                });
+                if ($patchError !== null) {
+                    return $patchError;
+                }
+                if (!$found) {
+                    return $this->opError($index, __('Target node was not found.', 'oxyai-oxygen'), 404);
+                }
+                $changed[] = $targetId;
+                return $tree;
+
             case 'update_node':
             case 'set_node_type':
                 $targetId = $this->intOrNull($op['targetNodeId'] ?? $op['nodeId'] ?? null);
@@ -340,7 +585,32 @@ trait OxygenTreeToolsTrait
                 }
                 $set = is_array($op['set'] ?? null) ? $op['set'] : [];
                 $unset = is_array($op['unset'] ?? null) ? $op['unset'] : [];
-                $found = $this->mutateNodeById($tree['root'], $targetId, function (array &$node) use ($type, $set, $unset): void {
+
+                if ($validator !== null) {
+                    // Build the post-write node to validate against (type + set applied).
+                    $current = null;
+                    $parent = null;
+                    $current = $this->findNodeCopy($tree['root'] ?? [], $targetId, $parent);
+                    if (is_array($current)) {
+                        $after = $current;
+                        if ($type !== null) {
+                            $after['data']['type'] = $type;
+                        }
+                        foreach ($set as $path => $value) {
+                            $this->setPath($after, (string) $path, $value);
+                        }
+                        $effectiveType = $type ?? (string) ($current['data']['type'] ?? '');
+                        if ($effectiveType !== '') {
+                            $check = $validator->validateWrite($effectiveType, $set, $after, false);
+                            if (is_wp_error($check)) {
+                                return $this->opError($index, $check->get_error_message(), (int) ($check->get_error_data()['status'] ?? 422));
+                            }
+                            $warnings = array_merge($warnings, $check['warnings']);
+                        }
+                    }
+                }
+
+                $found = $this->mutateNodeById($tree['root'], $targetId, function (array &$node) use ($type, $set, $unset, &$changedPaths): void {
                     if ($type !== null) {
                         if (!isset($node['data']) || !is_array($node['data'])) {
                             $node['data'] = [];
@@ -349,10 +619,12 @@ trait OxygenTreeToolsTrait
                     }
                     foreach ($set as $path => $value) {
                         $this->setPath($node, (string) $path, $value);
+                        $changedPaths[] = (string) $path;
                     }
                     foreach ($unset as $path) {
                         if (is_string($path)) {
                             $this->unsetPath($node, $path);
+                            $changedPaths[] = $path;
                         }
                     }
                 });
@@ -409,6 +681,16 @@ trait OxygenTreeToolsTrait
                 $node = is_array($op['node'] ?? null) ? $op['node'] : null;
                 if ($parentId === null || $node === null) {
                     return $this->opError($index, __('parentId and node are required for insert_node.', 'oxyai-oxygen'));
+                }
+                if ($validator !== null) {
+                    $insertType = (string) ($node['data']['type'] ?? '');
+                    if ($insertType !== '') {
+                        $check = $validator->validateWrite($insertType, [], $node, true);
+                        if (is_wp_error($check)) {
+                            return $this->opError($index, $check->get_error_message(), (int) ($check->get_error_data()['status'] ?? 422));
+                        }
+                        $warnings = array_merge($warnings, $check['warnings']);
+                    }
                 }
                 $providedId = $this->intOrNull($node['id'] ?? null);
                 $nextId = $this->calculateNextNodeId($tree['root'] ?? []);
@@ -611,6 +893,90 @@ trait OxygenTreeToolsTrait
         }
         $ref = $value;
         unset($ref);
+    }
+
+    /**
+     * Recursive deep-merge for patch_node.
+     *
+     * - Associative arrays merge key-by-key (recursively).
+     * - Scalars and list (sequential numeric) arrays replace wholesale.
+     *
+     * @param array<string, mixed> $base
+     * @param array<string, mixed> $patch
+     * @return array<string, mixed>
+     */
+    private function deepMerge(array $base, array $patch): array
+    {
+        foreach ($patch as $key => $value) {
+            if (
+                is_array($value)
+                && $this->isAssociative($value)
+                && isset($base[$key])
+                && is_array($base[$key])
+                && $this->isAssociative($base[$key])
+            ) {
+                $base[$key] = $this->deepMerge($base[$key], $value);
+            } else {
+                $base[$key] = $value;
+            }
+        }
+
+        return $base;
+    }
+
+    /**
+     * @param array<mixed> $value
+     */
+    private function isAssociative(array $value): bool
+    {
+        if ($value === []) {
+            return true;
+        }
+
+        return array_keys($value) !== range(0, count($value) - 1);
+    }
+
+    /**
+     * Flatten a patch object into dot-paths (relative to data) for validation,
+     * keeping leaf values. Used so patch_node reuses the set-path validator.
+     *
+     * @param array<string, mixed> $patch
+     * @return array<string, mixed> dot-path => leaf value
+     */
+    private function dotPathsFor(array $patch, string $prefix = 'data'): array
+    {
+        $paths = [];
+        foreach ($patch as $key => $value) {
+            $path = $prefix . '.' . $key;
+            if (is_array($value) && $this->isAssociative($value) && $value !== []) {
+                $paths = array_merge($paths, $this->dotPathsFor($value, $path));
+            } else {
+                $paths[$path] = $value;
+            }
+        }
+
+        return $paths;
+    }
+
+    /**
+     * Collect changed dot-paths from a patch object for the compact response.
+     *
+     * @param array<string, mixed> $patch
+     * @return array<int, string>
+     */
+    private function collectMergePaths(array $patch, string $prefix): array
+    {
+        $paths = [];
+        foreach ($patch as $key => $value) {
+            $path = $prefix . '.' . $key;
+            if (is_array($value) && $this->isAssociative($value) && $value !== []) {
+                $paths = array_merge($paths, $this->collectMergePaths($value, $path));
+            } else {
+                $paths[] = $path;
+            }
+        }
+
+        return $paths;
     }
 
     /**
@@ -855,7 +1221,12 @@ trait OxygenTreeToolsTrait
             return new WP_Error('oxyai_missing_existing_tree', __('The page has no existing Oxygen tree to operate on.', 'oxyai-oxygen'), ['status' => 400]);
         }
 
-        $applied = $this->applyNodeOperations($existingTree, $ops);
+        $validator = $options['_validator'] ?? null;
+        if (!$validator instanceof ElementWriteValidator) {
+            $validator = new ElementWriteValidator();
+        }
+
+        $applied = $this->applyNodeOperations($existingTree, $ops, $validator);
         if (is_wp_error($applied)) {
             return $applied;
         }
@@ -871,11 +1242,16 @@ trait OxygenTreeToolsTrait
             'opsApplied' => $applied['opsApplied'],
             'idMap' => $applied['idMap'],
             'changedNodeIds' => $applied['changedNodeIds'],
+            'changedPaths' => $applied['changedPaths'],
             'beforeNodeCount' => $this->countTreeNodes($existingTree),
             'afterNodeCount' => $this->countTreeNodes($newTree),
             'viewUrl' => get_permalink($postId),
             'editUrl' => get_edit_post_link($postId, 'raw'),
         ];
+
+        if (!empty($applied['mcpWarnings'])) {
+            $result['mcpWarnings'] = $applied['mcpWarnings'];
+        }
 
         if ($dryRun) {
             $result['outline'] = $this->summarizeTree($newTree)['nodes'];
@@ -897,6 +1273,45 @@ trait OxygenTreeToolsTrait
         $result['message'] = __('Oxygen page tree updated via node operations. A restore backup was created.', 'oxyai-oxygen');
 
         return $result;
+    }
+
+    /**
+     * Deep-merge a partial data object into a single node, preserving its id
+     * and untouched properties. Returns a compact confirmation only.
+     *
+     * @param array<string, mixed> $data partial node.data object
+     * @param array<string, mixed> $options dryRun?, recompile?
+     * @return array<string, mixed>|WP_Error
+     */
+    public function patchNode(int $postId, int $nodeId, array $data, array $options = [])
+    {
+        $result = $this->applyOperations(
+            $postId,
+            [['op' => 'patch_node', 'targetNodeId' => $nodeId, 'data' => $data]],
+            $options
+        );
+        if (is_wp_error($result)) {
+            return $result;
+        }
+
+        // Compact confirmation: ids/paths only, never the tree.
+        $compact = [
+            'success' => true,
+            'nodeId' => $nodeId,
+            'changedPaths' => $result['changedPaths'] ?? [],
+            'dryRun' => !empty($result['dryRun']),
+        ];
+        if (isset($result['backupId'])) {
+            $compact['backupId'] = $result['backupId'];
+        }
+        if (!empty($result['mcpWarnings'])) {
+            $compact['mcpWarnings'] = $result['mcpWarnings'];
+        }
+        if (isset($result['recompile'])) {
+            $compact['recompile'] = $result['recompile'];
+        }
+
+        return $compact;
     }
 
     /**
