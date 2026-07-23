@@ -1,0 +1,51 @@
+name: Smoke tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    name: PHP smoke suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+
+      - name: Run smoke tests
+        shell: bash
+        run: |
+          set +e
+          pass=0
+          fail=0
+          failures=""
+
+          for f in tests/smoke/*.php; do
+            output=$(php "$f" 2>&1)
+            code=$?
+            if [ "$code" -eq 0 ]; then
+              echo "PASS  $f"
+              pass=$((pass + 1))
+            else
+              echo "FAIL  $f (exit $code)"
+              echo "$output" | head -10 | sed 's/^/      /'
+              fail=$((fail + 1))
+              failures="$failures\n  - $f"
+            fi
+          done
+
+          echo ""
+          echo "Results: $pass passed, $fail failed"
+
+          if [ "$fail" -gt 0 ]; then
+            echo ""
+            echo "Failed tests:$failures"
+            exit 1
+          fi

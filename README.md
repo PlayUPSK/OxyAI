@@ -31,6 +31,7 @@ OxyAI Oxygen is a single WordPress plugin that turns raw HTML/CSS/JS — or a na
 - [Architecture](#architecture)
 - [Security](#security)
 - [Development](#development)
+  - [Running tests](#running-tests)
 - [Roadmap](#roadmap)
 - [License](#license)
 - [Credits](#credits)
@@ -346,9 +347,27 @@ PSR-4 mappings (see [`composer.json`](composer.json)):
 
 The plugin registers its own `spl_autoload_register` — running `composer install` is **not** required at runtime.
 
+### Running tests
+
+The project has a suite of standalone PHP smoke tests in `tests/smoke/`. Each script is self-contained — it stubs WordPress globals it needs, loads only the `src/` files under test, and exits non-zero on failure. No `composer install` or test framework is required.
+
+Run the full suite the same way CI does:
+
+```bash
+for f in tests/smoke/*.php; do php "$f" && echo "PASS $f" || echo "FAIL $f"; done
+```
+
+Or run a single test directly:
+
+```bash
+php tests/smoke/github-updater.php
+```
+
+CI runs the suite automatically on every push and pull request (`.github/workflows/tests.yml`). The release workflow additionally requires all tests to pass before building and publishing a release zip.
+
 ### Releasing
 
-Bump the `Version:` header in `oxyai-oxygen.php` and the `OXYAI_OXYGEN_VERSION` constant, then push to `main`. The [release workflow](.github/workflows/release-plugin.yml) packages an installable zip and publishes a GitHub release tagged `vX.Y.Z`.
+Bump the `Version:` header in `oxyai-oxygen.php` and the `OXYAI_OXYGEN_VERSION` constant, then push to `main`. The [release workflow](.github/workflows/release-plugin.yml) packages an installable zip and publishes a GitHub release tagged `vX.Y.Z`. The release includes a `<zipname>.sha256` checksum file alongside the zip, which the auto-updater can use to verify download integrity.
 
 ---
 
